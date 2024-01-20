@@ -10,13 +10,7 @@ add_subdirectory(modules/RTNeural)
 add_subdirectory(modules)
 include_directories(modules)
 
-set(JUCE_FORMATS AU VST3 Standalone)
-
-# Build LV2 only on Linux
-if(UNIX AND NOT APPLE)
-    message(STATUS "Building LV2 plugin format")
-    list(APPEND JUCE_FORMATS LV2)
-endif()
+set(JUCE_FORMATS VST3)
 
 juce_add_plugin(NeuralPi
     COMPANY_NAME GuitarML

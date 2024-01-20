@@ -9,7 +9,6 @@
 */
 
 #include "PluginProcessor.h"
-#include "PluginEditor.h"
 #include <iostream>
 #include <fstream>
 
@@ -43,6 +42,12 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
         loadIR(irFiles[current_ir_index]);
     }
 
+    juce::StringArray models;
+    for(const auto &f : jsonFiles)models.add(f.getFileNameWithoutExtension());
+
+    juce::StringArray irs;
+    for(const auto &f : irFiles)irs.add(f.getFileNameWithoutExtension());
+
     // initialize parameters:
     addParameter(gainParam = new AudioParameterFloat(GAIN_ID, GAIN_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
     addParameter(masterParam = new AudioParameterFloat(MASTER_ID, MASTER_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
@@ -50,10 +55,62 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     addParameter(midParam = new AudioParameterFloat(MID_ID, MID_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
     addParameter(trebleParam = new AudioParameterFloat(TREBLE_ID, TREBLE_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
     addParameter(presenceParam = new AudioParameterFloat(PRESENCE_ID, PRESENCE_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(modelParam = new AudioParameterFloat(MODEL_ID, MODEL_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
-    addParameter(irParam = new AudioParameterFloat(IR_ID, IR_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    addParameter(modelParam = new AudioParameterChoice(MODEL_ID, MODEL_NAME, models, current_model_index));
+    addParameter(irParam = new AudioParameterChoice(IR_ID, IR_NAME, irs, current_ir_index));
     addParameter(delayParam = new AudioParameterFloat(DELAY_ID, DELAY_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
     addParameter(reverbParam = new AudioParameterFloat(REVERB_ID, REVERB_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    addParameter(chorusParam = new AudioParameterFloat(CHORUS_ID, CHORUS_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    addParameter(flangerParam = new AudioParameterFloat(FLANGER_ID, FLANGER_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+
+    oscReceiver.modelCallback = [&] (juce::String value) {
+        int index = modelParam->choices.indexOf(value);
+        if(index != -1)modelParam->setValueNotifyingHost(index);
+    };
+
+    oscReceiver.irCallback = [&] (juce::String value) {
+        int index = irParam->choices.indexOf(value);
+        if(index != -1)irParam->setValueNotifyingHost(index);
+    };
+
+    oscReceiver.gainCallback = [&] (float value) {
+        gainParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.masterCallback = [&] (float value) {
+        masterParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.bassCallback = [&] (float value) {
+        bassParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.midCallback = [&] (float value) {
+        midParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.trebleCallback = [&] (float value) {
+        trebleParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.presenceCallback = [&] (float value) {
+        presenceParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.delayCallback = [&] (float value) {
+        delayParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.reverbCallback = [&] (float value) {
+        reverbParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.chorusCallback = [&] (float value) {
+        chorusParam->setValueNotifyingHost(value);
+    };
+
+    oscReceiver.flangerCallback = [&] (float value) {
+        flangerParam->setValueNotifyingHost(value);
+    };
 }
 
 
@@ -197,12 +254,14 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
         auto delay = (static_cast<float> (delayParam->get()));
         auto reverb = (static_cast<float> (reverbParam->get()));
+        auto chorus = (static_cast<float> (chorusParam->get()));
+        auto flanger = (static_cast<float> (flangerParam->get()));
 
-        auto model = static_cast<float> (modelParam->get());
-        model_index = getModelIndex(model);
+        //auto model = static_cast<float> ();
+        model_index = modelParam->getIndex();//getModelIndex(model);
 
-        auto ir = static_cast<float> (irParam->get());
-        ir_index = getIrIndex(ir);
+        //auto ir = static_cast<float> (irParam->get());
+        ir_index = irParam->getIndex();//getIrIndex(ir);
 
         // Applying gain adjustment for snapshot models
         if (LSTM.input_size == 1) {
@@ -251,9 +310,11 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 			buffer.applyGain(master * 2.0); // Adding volume range (2x) mainly for clean models
 		}
 
-        // Process Delay, and Reverb
+        // Process Delay, Reverb, Chorus and Flanger
         set_delayParams(delay);
         set_reverbParams(reverb);
+        set_chorusParams(chorus);
+        set_flangerParams(flanger);
         fxChain.process(context);
     }
 
@@ -263,17 +324,6 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
     
     for (int ch = 1; ch < buffer.getNumChannels(); ++ch)
         buffer.copyFrom(ch, 0, buffer, 0, 0, buffer.getNumSamples());
-}
-
-//==============================================================================
-bool NeuralPiAudioProcessor::hasEditor() const
-{
-    return true; // (change this to false if you choose to not supply an editor)
-}
-
-AudioProcessorEditor* NeuralPiAudioProcessor::createEditor()
-{
-    return new NeuralPiAudioProcessorEditor (*this);
 }
 
 //==============================================================================
@@ -287,10 +337,12 @@ void NeuralPiAudioProcessor::getStateInformation(MemoryBlock& destData)
     stream.writeFloat(*midParam);
     stream.writeFloat(*trebleParam);
     stream.writeFloat(*presenceParam);
-    stream.writeFloat(*modelParam);
-    stream.writeFloat(*irParam);
+    stream.writeInt(*modelParam);
+    stream.writeInt(*irParam);
     stream.writeFloat(*delayParam);
     stream.writeFloat(*reverbParam);
+    stream.writeFloat(*chorusParam);
+    stream.writeFloat(*flangerParam);
 }
 
 void NeuralPiAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -303,13 +355,15 @@ void NeuralPiAudioProcessor::setStateInformation(const void* data, int sizeInByt
     midParam->setValueNotifyingHost(stream.readFloat());
     trebleParam->setValueNotifyingHost(stream.readFloat());
     presenceParam->setValueNotifyingHost(stream.readFloat());
-    modelParam->setValueNotifyingHost(stream.readFloat());
-    irParam->setValueNotifyingHost(stream.readFloat());
+    modelParam->setValueNotifyingHost(stream.readInt());
+    irParam->setValueNotifyingHost(stream.readInt());
     delayParam->setValueNotifyingHost(stream.readFloat());
     reverbParam->setValueNotifyingHost(stream.readFloat());
+    chorusParam->setValueNotifyingHost(stream.readFloat());
+    flangerParam->setValueNotifyingHost(stream.readFloat());
 }
 
-int NeuralPiAudioProcessor::getModelIndex(float model_param)
+/*int NeuralPiAudioProcessor::getModelIndex(float model_param)
 {
     int a = static_cast<int>(round(model_param * (num_models - 1.0)));
     if (a > num_models - 1) {
@@ -331,7 +385,7 @@ int NeuralPiAudioProcessor::getIrIndex(float ir_param)
         a = 0;
     }
     return a;
-}
+}*/
 
 void NeuralPiAudioProcessor::loadConfig(File configFile)
 {
@@ -544,7 +598,7 @@ void NeuralPiAudioProcessor::set_delayParams(float paramValue)
 void NeuralPiAudioProcessor::set_reverbParams(float paramValue)
 {
     auto& rev = fxChain.template get<reverbIndex>();
-    rev_params = rev.getParameters();
+    auto rev_params = rev.getParameters();
 
     // Sets reverb params as a function of a single reverb param value ( 0.0 to 1.0)
     rev_params.wetLevel = paramValue;
@@ -552,6 +606,30 @@ void NeuralPiAudioProcessor::set_reverbParams(float paramValue)
     rev_params.roomSize = 0.8 - paramValue/2;
     //rev_params.width = paramValue;
     rev.setParameters(rev_params);
+}
+
+void NeuralPiAudioProcessor::set_chorusParams(float paramValue)
+{
+    auto& ch = fxChain.template get<chorusIndex>();
+
+    // Sets chorus params as a function of a single chorus param value ( 0.0 to 1.0)
+    ch.setMix(paramValue);
+    ch.setRate(50); // 0 - 99
+    ch.setDepth(0.5);  //0.0f - 1.0f
+    ch.setCentreDelay(15);  //1 - 100
+    ch.setFeedback(0);  //-1.0f - 1.0f
+}
+
+void NeuralPiAudioProcessor::set_flangerParams(float paramValue)
+{
+    auto& ch = fxChain.template get<chorusIndex>();
+
+    // Sets chorus params as a function of a single chorus param value ( 0.0 to 1.0)
+    ch.setMix(paramValue);
+    ch.setRate(50); // 0 - 99
+    ch.setDepth(0.5);  //0.0f - 1.0f
+    ch.setCentreDelay(2);  //1 - 100
+    ch.setFeedback(0);  //-1.0f - 1.0f
 }
 
 float NeuralPiAudioProcessor::convertLogScale(float in_value, float x_min, float x_max, float y_min, float y_max)

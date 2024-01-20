@@ -10,10 +10,10 @@
 
 #include <nlohmann/json.hpp>
 #include "RTNeuralLSTM.h"
-#include "AmpOSCReceiver.h"
 #include "Eq4Band.h"
 #include "CabSim.h"
 #include "Delay.h"
+#include "AmpOSCReceiver.h"
 
 #pragma once
 
@@ -39,6 +39,10 @@
 #define DELAY_NAME "Delay"
 #define REVERB_ID "reverb"
 #define REVERB_NAME "Reverb"
+#define CHORUS_ID "chorus"
+#define CHORUS_NAME "Chorus"
+#define FLANGER_ID "flanger"
+#define FLANGER_NAME "Flanger"
 
 //==============================================================================
 /**
@@ -61,8 +65,15 @@ public:
     void processBlock (AudioBuffer<float>&, MidiBuffer&) override;
 
     //==============================================================================
-    AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override;
+    AudioProcessorEditor* createEditor() override
+    {
+      return nullptr;
+    }
+
+    bool hasEditor() const override
+    {
+      return false;
+    }
 
     //==============================================================================
     const String getName() const override;
@@ -83,8 +94,8 @@ public:
     void getStateInformation (MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    int getModelIndex(float model_param);
-    int getIrIndex(float ir_param);
+    //int getModelIndex(float model_param);
+    //int getIrIndex(float ir_param);
     void loadConfig(File configFile);
     void loadIR(File irFile);
     void setupDataDirectories();
@@ -93,6 +104,8 @@ public:
     void set_ampEQ(float bass_slider, float mid_slider, float treble_slider, float presence_slider);
     void set_delayParams(float paramValue);
     void set_reverbParams(float paramValue);
+    void set_chorusParams(float paramValue);
+    void set_flangerParams(float paramValue);
     
     float convertLogScale(float in_value, float x_min, float x_max, float y_min, float y_max);
 
@@ -137,8 +150,6 @@ public:
 
     RT_LSTM LSTM;
 
-    juce::dsp::Reverb::Parameters rev_params;
-
 private:
     var dummyVar;
     Eq4Band eq4band; // Amp EQ
@@ -149,10 +160,12 @@ private:
     AudioParameterFloat* midParam;
     AudioParameterFloat* trebleParam;
     AudioParameterFloat* presenceParam;
-    AudioParameterFloat* modelParam;
-    AudioParameterFloat* irParam;
+    AudioParameterChoice* modelParam;
+    AudioParameterChoice* irParam;
     AudioParameterFloat* delayParam;
     AudioParameterFloat* reverbParam;
+    AudioParameterFloat* chorusParam;
+    AudioParameterFloat* flangerParam;
 
     dsp::IIR::Filter<float> dcBlocker;
 
@@ -163,10 +176,19 @@ private:
     enum
     {
         delayIndex,
-        reverbIndex
+        reverbIndex,
+        chorusIndex,
+        flangerIndex
     };
 
-    juce::dsp::ProcessorChain<Delay<float>, juce::dsp::Reverb> fxChain;
+    AmpOSCReceiver oscReceiver;
+
+    juce::dsp::ProcessorChain<
+        Delay<float>,
+        juce::dsp::Reverb,
+        juce::dsp::Chorus<float>,
+        juce::dsp::Chorus<float>
+    > fxChain;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeuralPiAudioProcessor)
