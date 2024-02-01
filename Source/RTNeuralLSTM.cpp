@@ -18,7 +18,7 @@ Vec2d transpose(const Vec2d& x)
 }
 
 template <typename T1>
-void RT_LSTM::set_weights(T1 model, const char* filename)
+void RT_LSTM::set_weights_NeuralPi(T1 model, const char* filename)
 {
     // Initialize the correct model
     auto& lstm = (*model).template get<0>();
@@ -46,8 +46,45 @@ void RT_LSTM::set_weights(T1 model, const char* filename)
 
     std::vector<float> dense_bias = weights_json["/state_dict/lin.bias"_json_pointer];
     dense.setBias(dense_bias.data());
-   
+
+    std::ofstream out("/tmp/debug", std::ios::app);
+    out<<"NeuralPi loaded"<<std::endl;
 }
+
+template <typename T1>
+void RT_LSTM::set_weights_Proteus(T1 model, const char* filename)
+{
+    // Initialize the correct model
+    auto& lstm = (*model).template get<0>();
+    auto& dense = (*model).template get<1>();
+
+    // read a JSON file
+    std::ifstream i2(filename);
+    nlohmann::json weights_json;
+    i2 >> weights_json;
+
+    Vec2d lstm_weights_ih = weights_json["/state_dict/rec.weight_ih_l0"_json_pointer];
+    lstm.setWVals(transpose(lstm_weights_ih));
+
+    Vec2d lstm_weights_hh = weights_json["/state_dict/rec.weight_hh_l0"_json_pointer];
+    lstm.setUVals(transpose(lstm_weights_hh));
+
+    std::vector<float> lstm_bias_ih = weights_json["/state_dict/rec.bias_ih_l0"_json_pointer];
+    std::vector<float> lstm_bias_hh = weights_json["/state_dict/rec.bias_hh_l0"_json_pointer];
+    for (int i = 0; i < 160; ++i)
+        lstm_bias_hh[i] += lstm_bias_ih[i];
+    lstm.setBVals(lstm_bias_hh);
+
+    Vec2d dense_weights = weights_json["/state_dict/lin.weight"_json_pointer];
+    dense.setWeights(dense_weights);
+
+    std::vector<float> dense_bias = weights_json["/state_dict/lin.bias"_json_pointer];
+    dense.setBias(dense_bias.data());
+
+    std::ofstream out("/tmp/debug", std::ios::app);
+    out<<"Proteus loaded"<<std::endl; 
+}
+
 void RT_LSTM::load_json(const char* filename)
 {
     // Read in the JSON file
@@ -56,53 +93,112 @@ void RT_LSTM::load_json(const char* filename)
 	i2 >> weights_json;
 
     // Get the input size of the JSON file
-	int input_size_json = weights_json["/model_data/input_size"_json_pointer];
-	input_size = input_size_json;
+	input_size = weights_json["/model_data/input_size"_json_pointer];
 
-    // Load the appropriate model
-    if (input_size == 1) {
-		set_weights(&model, filename);
+    int hidden_size = weights_json["/model_data/hidden_size"_json_pointer];
+
+    if(hidden_size == 20)
+    {
+        type = RT_LSTM_Type::NeuralPi;
+        
+        // Load the appropriate model
+        if (input_size == 1) {
+            set_weights_NeuralPi(&model, filename);
+        }
+        else if (input_size == 2) {
+            set_weights_NeuralPi(&model_cond1, filename);
+        } 
+        else if (input_size == 3) {
+            set_weights_NeuralPi(&model_cond2, filename);
+        }
     }
-    else if (input_size == 2) {
-		set_weights(&model_cond1, filename);
-    } 
-    else if (input_size == 3) {
-		set_weights(&model_cond2, filename);
-    } 
+    else if(hidden_size == 40)
+    {
+        type = RT_LSTM_Type::Proteus;
+
+        // Load the appropriate model
+        if (input_size == 1) {
+            set_weights_Proteus(&model_proteus, filename);
+        }
+        else if (input_size == 2) {
+            set_weights_Proteus(&model_proteus_cond1, filename);
+        } 
+        else if (input_size == 3) {
+            set_weights_Proteus(&model_proteus_cond2, filename);
+        }
+    }
 }
 
 
 void RT_LSTM::reset()
 {
-    if (input_size == 1) {
+    if(type == RT_LSTM_Type::NeuralPi)
+    {
         model.reset();
-    } else {
         model_cond1.reset();
+        model_cond2.reset();
+    }
+    else
+    {
+        model_proteus.reset();
+        model_proteus_cond1.reset();
+        model_proteus_cond2.reset();
     }
 }
 
 void RT_LSTM::process(const float* inData, float* outData, int numSamples)
 {
-    for (int i = 0; i < numSamples; ++i)
-        outData[i] = model.forward(inData + i) + inData[i];
+    if(type == RT_LSTM_Type::NeuralPi)
+    {
+        for (int i = 0; i < numSamples; ++i)
+            outData[i] = model.forward(inData + i) + inData[i];
+    }
+    else
+    {
+        for (int i = 0; i < numSamples; ++i)
+            outData[i] = model_proteus.forward(inData + i) + inData[i];
+    }
 }
 
 void RT_LSTM::process(const float* inData, float param, float* outData, int numSamples)
 {
-    for (int i = 0; i < numSamples; ++i) {
-        inArray1[0] = inData[i];
-        inArray1[1] = param;
-        outData[i] = model_cond1.forward(inArray1) + inData[i];
+    if(type == RT_LSTM_Type::NeuralPi)
+    {
+        for (int i = 0; i < numSamples; ++i) {
+            inArray1[0] = inData[i];
+            inArray1[1] = param;
+            outData[i] = model_cond1.forward(inArray1) + inData[i];
+        }
+    }
+    else
+    {
+        for (int i = 0; i < numSamples; ++i) {
+            inArray1[0] = inData[i];
+            inArray1[1] = param;
+            outData[i] = model_proteus_cond1.forward(inArray1) + inData[i];
+        }
     }
 }
 
 void RT_LSTM::process(const float* inData, float param1, float param2, float* outData, int numSamples)
 {
-    for (int i = 0; i < numSamples; ++i) {
-        inArray2[0] = inData[i];
-        inArray2[1] = param1;
-        inArray2[2] = param2;
-        outData[i] = model_cond2.forward(inArray2) + inData[i];
+    if(type == RT_LSTM_Type::NeuralPi)
+    {
+        for (int i = 0; i < numSamples; ++i) {
+            inArray2[0] = inData[i];
+            inArray2[1] = param1;
+            inArray2[2] = param2;
+            outData[i] = model_cond2.forward(inArray2) + inData[i];
+        }
+    }
+    else
+    {
+        for (int i = 0; i < numSamples; ++i) {
+            inArray2[0] = inData[i];
+            inArray2[1] = param1;
+            inArray2[2] = param2;
+            outData[i] = model_proteus_cond2.forward(inArray2) + inData[i];
+        }
     }
 }
 
