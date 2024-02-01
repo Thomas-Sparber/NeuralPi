@@ -21,10 +21,6 @@
 
 #define GAIN_ID "gain"
 #define GAIN_NAME "Gain"
-#define MODEL_ID "model"
-#define MODEL_NAME "Model"
-#define IR_ID "ir"
-#define IR_NAME "Ir"
 #define MASTER_ID "master"
 #define MASTER_NAME "Master"
 #define BASS_ID "bass"
@@ -35,19 +31,67 @@
 #define TREBLE_NAME "Treble"
 #define PRESENCE_ID "presence"
 #define PRESENCE_NAME "Presence"
+
 #define DELAY_ID "delay"
 #define DELAY_NAME "Delay"
-#define REVERB_ID "reverb"
-#define REVERB_NAME "Reverb"
+#define DELAYWETLEVEL_ID "delayWetLevel"
+#define DELAYWETLEVEL_NAME "DelayWetLevel"
+#define DELAYTIME_ID "delayTime"
+#define DELAYTIME_NAME "DelayTime"
+#define DELAYFEEDBACK_ID "delayFeedback"
+#define DELAYFEEDBACK_NAME "DelayFeedback"
+
 #define CHORUS_ID "chorus"
 #define CHORUS_NAME "Chorus"
+#define CHORUSMIX_ID "chorusMix"
+#define CHORUSMIX_NAME "ChorusMix"
+#define CHORUSRATE_ID "chorusRate"
+#define CHORUSRATE_NAME "ChorusRate"
+#define CHORUSDEPTH_ID "chorusDepth"
+#define CHORUSDEPTH_NAME "ChorusDepth"
+#define CHORUSCENTREDELAY_ID "chorusCentreDelay"
+#define CHORUSCENTREDELAY_NAME "ChorusCentreDelay"
+#define CHORUSFEEDBACK_ID "chorusFeedback"
+#define CHORUSFEEDBACK_NAME "ChorusFeedback"
+
 #define FLANGER_ID "flanger"
 #define FLANGER_NAME "Flanger"
+#define FLANGERMIX_ID "flangerMix"
+#define FLANGERMIX_NAME "FlangerMix"
+#define FLANGERRATE_ID "flangerRate"
+#define FLANGERRATE_NAME "FlangerRate"
+#define FLANGERDEPTH_ID "flangerDepth"
+#define FLANGERDEPTH_NAME "FlangerDepth"
+#define FLANGERCENTREDELAY_ID "flangerCentreDelay"
+#define FLANGERCENTREDELAY_NAME "FlangerCentreDelay"
+#define FLANGERFEEDBACK_ID "flangerFeedback"
+#define FLANGERFEEDBACK_NAME "FlangerFeedback"
+
+#define REVERB_ID "reverb"
+#define REVERB_NAME "Reverb"
+#define REVERBWETLEVEL_ID "reverbWetLevel"
+#define REVERBWETLEVEL_NAME "ReverbWetLevel"
+#define REVERBDAMPING_ID "reverbDamping"
+#define REVERBDAMPING_NAME "ReverbDamping"
+#define REVERBROOMSIZE_ID "reverbRoomSize"
+#define REVERBROOMSIZE_NAME "ReverbRoomSize"
+
+#define MODEL_ID "model"
+#define MODEL_NAME "Model"
+#define IR_ID "ir"
+#define IR_NAME "Ir"
+
+#define AMPSTATE_ID "ampState"
+#define AMPSTATE_NAME "AmpState"
+#define LSTMSTATE_ID "lstmState"
+#define LSTMSTATE_NAME "LSTMState"
+#define IRSTATE_ID "irState"
+#define IRSTATE_NAME "irState"
 
 //==============================================================================
 /**
 */
-class NeuralPiAudioProcessor  : public AudioProcessor
+class NeuralPiAudioProcessor  : public AudioProcessor, public juce::AudioProcessorValueTreeState::Listener
 {
 public:
     //==============================================================================
@@ -84,6 +128,8 @@ public:
     double getTailLengthSeconds() const override;
 
     //==============================================================================
+    AudioProcessorValueTreeState::ParameterLayout createParameters();
+    void parameterChanged (const juce::String& parameterID, float newValue) override;
     int getNumPrograms() override;
     int getCurrentProgram() override;
     void setCurrentProgram (int index) override;
@@ -94,101 +140,67 @@ public:
     void getStateInformation (MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    //int getModelIndex(float model_param);
-    //int getIrIndex(float ir_param);
-    void loadConfig(File configFile);
+    void loadConfig(File configFile, RT_LSTM &out);
     void loadIR(File irFile);
     void setupDataDirectories();
     void installTones();
 
-    void set_ampEQ(float bass_slider, float mid_slider, float treble_slider, float presence_slider);
     void set_delayParams(float paramValue);
     void set_reverbParams(float paramValue);
     void set_chorusParams(float paramValue);
     void set_flangerParams(float paramValue);
-    
-    float convertLogScale(float in_value, float x_min, float x_max, float y_min, float y_max);
 
-    float decibelToLinear(float dbValue);
-
-    void addDirectory(const File& file);
-    void addDirectoryIR(const File& file);
     void resetDirectory(const File& file);
     void resetDirectoryIR(const File& file);
+
     std::vector<File> jsonFiles;
     std::vector<File> irFiles;
-    File currentDirectory = File::getCurrentWorkingDirectory().getFullPathName();
     File userAppDataDirectory = File::getSpecialLocation(File::userDocumentsDirectory).getChildFile(JucePlugin_Manufacturer).getChildFile(JucePlugin_Name);
     File userAppDataDirectory_tones = userAppDataDirectory.getFullPathName() + "/tones";
     File userAppDataDirectory_irs = userAppDataDirectory.getFullPathName() + "/irs";
 
-    // Pedal/amp states
-    int amp_state = 1; // 0 = off, 1 = on
-    int custom_tone = 0; // 0 = custom tone loaded, 1 = default channel tone
-    File loaded_tone;
-    juce::String loaded_tone_name;
-    const char* char_filename = "";
-    int model_loaded = 0;
-    int current_model_index = 0;
-    float num_models = 0.0;
-    int model_index = 0; // Used in processBlock when converting slider param to model index
-    bool lstm_state = true;
+    float gain = 0.5f;
+    float master = 0.5f;
+    float delayValue = 0.0f;
+    float chorusValue = 0.0f;
+    float flangerValue = 0.0f;
+    float reverbValue = 0.05;
 
-    juce::String loaded_ir_name;
-    float num_irs = 0.0;
-    int ir_loaded = 0;
-    int custom_ir = 0; // 0 = custom tone loaded, 1 = default channel tone
-    File loaded_ir;
-    bool ir_state = true;
+    bool ampState = true;
+    bool lstmState = true;
+    bool irState = true;
+
+    // Pedal/amp states
+    bool model_loaded = false;
+    int current_model_index = 0;
+    int model_index = 0;
+
+    bool ir_loaded = false;
     int current_ir_index = 0;
     int ir_index = 0;
 
-    // The number of parameters for the model
-    // 0 is for a snap shot model
-    // The PluginEditor uses this to determin which knobs to color red
-    int params = 0;
+    juce::AudioProcessorValueTreeState apvts;
 
-    RT_LSTM LSTM;
+    float averagedRMS = 0;
 
 private:
-    var dummyVar;
-    Eq4Band eq4band; // Amp EQ
+    std::atomic<int> currentLSTM = 0;
+    RT_LSTM LSTM;
+    RT_LSTM LSTM2;
 
-    AudioParameterFloat* gainParam;
-    AudioParameterFloat* masterParam;
-    AudioParameterFloat* bassParam;
-    AudioParameterFloat* midParam;
-    AudioParameterFloat* trebleParam;
-    AudioParameterFloat* presenceParam;
-    AudioParameterChoice* modelParam;
-    AudioParameterChoice* irParam;
-    AudioParameterFloat* delayParam;
-    AudioParameterFloat* reverbParam;
-    AudioParameterFloat* chorusParam;
-    AudioParameterFloat* flangerParam;
+    Eq4Band eq4band; // Amp EQ
 
     dsp::IIR::Filter<float> dcBlocker;
 
     // IR processing
     CabSim cabSimIR;
 
-    // Effects
-    enum
-    {
-        delayIndex,
-        reverbIndex,
-        chorusIndex,
-        flangerIndex
-    };
-
     AmpOSCReceiver oscReceiver;
 
-    juce::dsp::ProcessorChain<
-        Delay<float>,
-        juce::dsp::Reverb,
-        juce::dsp::Chorus<float>,
-        juce::dsp::Chorus<float>
-    > fxChain;
+    Delay<float> delay;
+    juce::dsp::Reverb reverb;
+    juce::dsp::Chorus<float> chorus;
+    juce::dsp::Chorus<float> flanger;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NeuralPiAudioProcessor)

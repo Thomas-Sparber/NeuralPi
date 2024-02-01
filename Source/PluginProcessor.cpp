@@ -22,7 +22,7 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
 #endif
         .withOutput("Output", AudioChannelSet::stereo(), true)
 #endif
-    )
+    ), apvts (*this, nullptr, "Parameters", createParameters())
 
 #endif
 {
@@ -32,7 +32,7 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     // Sort jsonFiles alphabetically
     std::sort(jsonFiles.begin(), jsonFiles.end());
     if (jsonFiles.size() > 0) {
-        loadConfig(jsonFiles[current_model_index]);
+        loadConfig(jsonFiles[current_model_index], LSTM);
     }
 
     resetDirectoryIR(userAppDataDirectory_irs);
@@ -42,80 +42,328 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
         loadIR(irFiles[current_ir_index]);
     }
 
-    juce::StringArray models;
-    for(const auto &f : jsonFiles)models.add(f.getFileNameWithoutExtension());
-
-    juce::StringArray irs;
-    for(const auto &f : irFiles)irs.add(f.getFileNameWithoutExtension());
-
-    // initialize parameters:
-    addParameter(gainParam = new AudioParameterFloat(GAIN_ID, GAIN_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(masterParam = new AudioParameterFloat(MASTER_ID, MASTER_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(bassParam = new AudioParameterFloat(BASS_ID, BASS_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(midParam = new AudioParameterFloat(MID_ID, MID_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(trebleParam = new AudioParameterFloat(TREBLE_ID, TREBLE_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(presenceParam = new AudioParameterFloat(PRESENCE_ID, PRESENCE_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
-    addParameter(modelParam = new AudioParameterChoice(MODEL_ID, MODEL_NAME, models, current_model_index));
-    addParameter(irParam = new AudioParameterChoice(IR_ID, IR_NAME, irs, current_ir_index));
-    addParameter(delayParam = new AudioParameterFloat(DELAY_ID, DELAY_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
-    addParameter(reverbParam = new AudioParameterFloat(REVERB_ID, REVERB_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
-    addParameter(chorusParam = new AudioParameterFloat(CHORUS_ID, CHORUS_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
-    addParameter(flangerParam = new AudioParameterFloat(FLANGER_ID, FLANGER_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
-
     oscReceiver.modelCallback = [&] (juce::String value) {
-        int index = modelParam->choices.indexOf(value);
-        if(index != -1)modelParam->setValueNotifyingHost(index);
+        bool found = false;
+
+        for(size_t i = 0; i < jsonFiles.size(); i++) {
+            if(value == jsonFiles[i].getFileNameWithoutExtension()) {
+                float value = static_cast<float>(i) / jsonFiles.size();
+                apvts.getParameter(MODEL_ID)->setValueNotifyingHost(value);
+                found = true;
+                break;
+            }
+        }
+
+        if(!found)
+        {
+            File fullpath = userAppDataDirectory_tones.getFullPathName() + "/" + value + ".json";
+            if(fullpath.existsAsFile())
+            {
+                jsonFiles.push_back(fullpath);
+                float value = static_cast<float>(jsonFiles.size() - 1) / jsonFiles.size();
+                apvts.getParameter(MODEL_ID)->setValueNotifyingHost(value);
+            }
+        }
     };
 
     oscReceiver.irCallback = [&] (juce::String value) {
-        int index = irParam->choices.indexOf(value);
-        if(index != -1)irParam->setValueNotifyingHost(index);
+        bool found = false;
+
+        for(size_t i = 0; i < irFiles.size(); i++) {
+            if(value == irFiles[i].getFileNameWithoutExtension()) {
+                float value = static_cast<float>(i) / irFiles.size();
+                apvts.getParameter(IR_ID)->setValueNotifyingHost(value);
+                found = true;
+                break;
+            }
+        }
+
+        if(!found)
+        {
+            File fullpath = userAppDataDirectory_irs.getFullPathName() + "/" + value + ".wav";
+            if(fullpath.existsAsFile())
+            {
+                irFiles.push_back(fullpath);
+                float value = static_cast<float>(irFiles.size() - 1) / irFiles.size();
+                apvts.getParameter(IR_ID)->setValueNotifyingHost(value);
+            }
+        }
     };
 
-    oscReceiver.gainCallback = [&] (float value) {
-        gainParam->setValueNotifyingHost(value);
-    };
+    oscReceiver.gainCallback =      [&] (float value) { apvts.getParameter(GAIN_ID)->setValueNotifyingHost(value); };
+    oscReceiver.masterCallback =    [&] (float value) { apvts.getParameter(MASTER_ID)->setValueNotifyingHost(value); };
+    oscReceiver.bassCallback =      [&] (float value) { apvts.getParameter(BASS_ID)->setValueNotifyingHost(value); };
+    oscReceiver.midCallback =       [&] (float value) { apvts.getParameter(MID_ID)->setValueNotifyingHost(value); };
+    oscReceiver.trebleCallback =    [&] (float value) { apvts.getParameter(TREBLE_ID)->setValueNotifyingHost(value); };
+    oscReceiver.presenceCallback =  [&] (float value) { apvts.getParameter(PRESENCE_ID)->setValueNotifyingHost(value); };
 
-    oscReceiver.masterCallback = [&] (float value) {
-        masterParam->setValueNotifyingHost(value);
-    };
+    oscReceiver.delayCallback =         [&] (float value) { apvts.getParameter(DELAY_ID)->setValueNotifyingHost(value); };
+    oscReceiver.delayWetLevelCallback = [&] (float value) { apvts.getParameter(DELAYWETLEVEL_ID)->setValueNotifyingHost(value); };
+    oscReceiver.delayTimeCallback =     [&] (float value) { apvts.getParameter(DELAYTIME_ID)->setValueNotifyingHost(value); };
+    oscReceiver.delayFeedbackCallback = [&] (float value) { apvts.getParameter(DELAYFEEDBACK_ID)->setValueNotifyingHost(value); };
 
-    oscReceiver.bassCallback = [&] (float value) {
-        bassParam->setValueNotifyingHost(value);
-    };
+    oscReceiver.chorusCallback =            [&] (float value) { apvts.getParameter(CHORUS_ID)->setValueNotifyingHost(value); };
+    oscReceiver.chorusMixCallback =         [&] (float value) { apvts.getParameter(CHORUSMIX_ID)->setValueNotifyingHost(value); };
+    oscReceiver.chorusRateCallback =        [&] (float value) { apvts.getParameter(CHORUSRATE_ID)->setValueNotifyingHost(value); };
+    oscReceiver.chorusDepthCallback =       [&] (float value) { apvts.getParameter(CHORUSDEPTH_ID)->setValueNotifyingHost(value); };
+    oscReceiver.chorusCentreDelayCallback = [&] (float value) { apvts.getParameter(CHORUSCENTREDELAY_ID)->setValueNotifyingHost(value); };
+    oscReceiver.chorusFeedbackCallback =    [&] (float value) { apvts.getParameter(CHORUSFEEDBACK_ID)->setValueNotifyingHost(value); };
 
-    oscReceiver.midCallback = [&] (float value) {
-        midParam->setValueNotifyingHost(value);
-    };
+    oscReceiver.flangerCallback =            [&] (float value) { apvts.getParameter(FLANGER_ID)->setValueNotifyingHost(value); };
+    oscReceiver.flangerMixCallback =         [&] (float value) { apvts.getParameter(FLANGERMIX_ID)->setValueNotifyingHost(value); };
+    oscReceiver.flangerRateCallback =        [&] (float value) { apvts.getParameter(FLANGERRATE_ID)->setValueNotifyingHost(value); };
+    oscReceiver.flangerDepthCallback =       [&] (float value) { apvts.getParameter(FLANGERDEPTH_ID)->setValueNotifyingHost(value); };
+    oscReceiver.flangerCentreDelayCallback = [&] (float value) { apvts.getParameter(FLANGERCENTREDELAY_ID)->setValueNotifyingHost(value); };
+    oscReceiver.flangerFeedbackCallback =    [&] (float value) { apvts.getParameter(FLANGERFEEDBACK_ID)->setValueNotifyingHost(value); };
 
-    oscReceiver.trebleCallback = [&] (float value) {
-        trebleParam->setValueNotifyingHost(value);
-    };
+    oscReceiver.reverbCallback =         [&] (float value) { apvts.getParameter(REVERB_ID)->setValueNotifyingHost(value); };
+    oscReceiver.reverbWetLevelCallback = [&] (float value) { apvts.getParameter(REVERBWETLEVEL_ID)->setValueNotifyingHost(value); };
+    oscReceiver.reverbDampingCallback =  [&] (float value) { apvts.getParameter(REVERBDAMPING_ID)->setValueNotifyingHost(value); };
+    oscReceiver.reverbRoomSizeCallback = [&] (float value) { apvts.getParameter(REVERBROOMSIZE_ID)->setValueNotifyingHost(value); };
 
-    oscReceiver.presenceCallback = [&] (float value) {
-        presenceParam->setValueNotifyingHost(value);
-    };
+    oscReceiver.ampStateCallback =  [&] (bool value) { apvts.getParameter(AMPSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.lstmStateCallback = [&] (bool value) { apvts.getParameter(LSTMSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.irStateCallback =   [&] (bool value) { apvts.getParameter(IRSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
 
-    oscReceiver.delayCallback = [&] (float value) {
-        delayParam->setValueNotifyingHost(value);
-    };
+    apvts.addParameterListener (MODEL_ID, this);
+    apvts.addParameterListener (IR_ID, this);
 
-    oscReceiver.reverbCallback = [&] (float value) {
-        reverbParam->setValueNotifyingHost(value);
-    };
+    apvts.addParameterListener (GAIN_ID, this);
+    apvts.addParameterListener (MASTER_ID, this);
+    apvts.addParameterListener (BASS_ID, this);
+    apvts.addParameterListener (MID_ID, this);
+    apvts.addParameterListener (TREBLE_ID, this);
+    apvts.addParameterListener (PRESENCE_ID, this);
 
-    oscReceiver.chorusCallback = [&] (float value) {
-        chorusParam->setValueNotifyingHost(value);
-    };
+    apvts.addParameterListener (DELAY_ID, this);
+    apvts.addParameterListener (DELAYWETLEVEL_ID, this);
+    apvts.addParameterListener (DELAYTIME_ID, this);
+    apvts.addParameterListener (DELAYFEEDBACK_ID, this);
 
-    oscReceiver.flangerCallback = [&] (float value) {
-        flangerParam->setValueNotifyingHost(value);
-    };
+    apvts.addParameterListener (CHORUS_ID, this);
+    apvts.addParameterListener (CHORUSMIX_ID, this);
+    apvts.addParameterListener (CHORUSRATE_ID, this);
+    apvts.addParameterListener (CHORUSDEPTH_ID, this);
+    apvts.addParameterListener (CHORUSCENTREDELAY_ID, this);
+    apvts.addParameterListener (CHORUSFEEDBACK_ID, this);
+
+    apvts.addParameterListener (FLANGER_ID, this);
+    apvts.addParameterListener (FLANGERMIX_ID, this);
+    apvts.addParameterListener (FLANGERRATE_ID, this);
+    apvts.addParameterListener (FLANGERDEPTH_ID, this);
+    apvts.addParameterListener (FLANGERCENTREDELAY_ID, this);
+    apvts.addParameterListener (FLANGERFEEDBACK_ID, this);
+
+    apvts.addParameterListener (REVERB_ID, this);
+    apvts.addParameterListener (REVERBWETLEVEL_ID, this);
+    apvts.addParameterListener (REVERBDAMPING_ID, this);
+    apvts.addParameterListener (REVERBROOMSIZE_ID, this);
+
+    apvts.addParameterListener (AMPSTATE_ID, this);
+    apvts.addParameterListener (LSTMSTATE_ID, this);
+    apvts.addParameterListener (IRSTATE_ID, this);
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout NeuralPiAudioProcessor::createParameters()
+{
+    juce::AudioProcessorValueTreeState::ParameterLayout params;
+
+    // initialize parameters:
+    params.add (std::make_unique<AudioParameterFloat>(MODEL_ID,     MODEL_NAME,     NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(IR_ID,        IR_NAME,        NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 0.0f));
+    
+    params.add (std::make_unique<AudioParameterFloat>(GAIN_ID,      GAIN_NAME,      NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
+    params.add (std::make_unique<AudioParameterFloat>(MASTER_ID,    MASTER_NAME,    NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
+    params.add (std::make_unique<AudioParameterFloat>(BASS_ID,      BASS_NAME,      NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
+    params.add (std::make_unique<AudioParameterFloat>(MID_ID,       MID_NAME,       NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
+    params.add (std::make_unique<AudioParameterFloat>(TREBLE_ID,    TREBLE_NAME,    NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
+    params.add (std::make_unique<AudioParameterFloat>(PRESENCE_ID,  PRESENCE_NAME,  NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
+    
+    params.add (std::make_unique<AudioParameterFloat>(DELAY_ID,         DELAY_NAME,         NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(DELAYWETLEVEL_ID, DELAYWETLEVEL_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(DELAYTIME_ID,     DELAYTIME_NAME,     NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(DELAYFEEDBACK_ID, DELAYFEEDBACK_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+
+    params.add (std::make_unique<AudioParameterFloat>(CHORUS_ID,            CHORUS_NAME,            NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(CHORUSMIX_ID,         CHORUSMIX_NAME,         NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(CHORUSRATE_ID,        CHORUSRATE_NAME,        NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(CHORUSDEPTH_ID,       CHORUSDEPTH_NAME,       NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(CHORUSCENTREDELAY_ID, CHORUSCENTREDELAY_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(CHORUSFEEDBACK_ID,    CHORUSFEEDBACK_NAME,    NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+
+    params.add (std::make_unique<AudioParameterFloat>(FLANGER_ID,            FLANGER_NAME,            NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(FLANGERMIX_ID,         FLANGERMIX_NAME,         NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(FLANGERRATE_ID,        FLANGERRATE_NAME,        NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(FLANGERDEPTH_ID,       FLANGERDEPTH_NAME,       NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(FLANGERCENTREDELAY_ID, FLANGERCENTREDELAY_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(FLANGERFEEDBACK_ID,    FLANGERFEEDBACK_NAME,    NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+
+    params.add (std::make_unique<AudioParameterFloat>(REVERB_ID,         REVERB_NAME,         NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(REVERBWETLEVEL_ID, REVERBWETLEVEL_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(REVERBDAMPING_ID,  REVERBDAMPING_NAME,  NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(REVERBROOMSIZE_ID, REVERBROOMSIZE_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
+
+    params.add (std::make_unique<AudioParameterFloat>(AMPSTATE_ID,  AMPSTATE_NAME,  NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(LSTMSTATE_ID, LSTMSTATE_NAME, NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(IRSTATE_ID,   IRSTATE_NAME,   NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+
+    return params;
+}
+
+void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, float newValue)
+{
+    //std::ofstream out("/tmp/debug", std::ios::app);
+    //out<<"parameter changed "<<parameterID<<": "<<newValue<<std::endl;
+
+    
+        
+    if (parameterID == MODEL_ID)
+    {
+        int model_index = jlimit(0, static_cast<int>(jsonFiles.size()-1), static_cast<int>(newValue * jsonFiles.size() + 0.5f));
+        
+        if(currentLSTM == 0)
+        {
+            loadConfig(jsonFiles[model_index], LSTM2);
+            currentLSTM = 1;
+        }
+        else
+        {
+            loadConfig(jsonFiles[model_index], LSTM);
+            currentLSTM = 0;
+        }
+    }
+    if (parameterID == IR_ID)
+        ir_index = jlimit(0, static_cast<int>(irFiles.size()-1), static_cast<int>(newValue * irFiles.size() + 0.5f));
+
+    if (parameterID == GAIN_ID)
+        gain = newValue;
+    if (parameterID == MASTER_ID)
+        master = newValue;
+    if (parameterID == BASS_ID)
+    {
+        float bass = (newValue - 0.5) * 24.0;
+        eq4band.setBass(bass);
+    }
+    if (parameterID == MID_ID)
+    {
+        float mid = (newValue - 0.5) * 24.0;
+        eq4band.setMid(mid);
+    }
+    if (parameterID == TREBLE_ID)
+    {
+        float treble = (newValue - 0.5) * 24.0;
+        eq4band.setTreble(treble);
+    }
+    if (parameterID == PRESENCE_ID)
+    {
+        float presence = (newValue - 0.5) * 24.0;
+        eq4band.setPresence(presence);
+    }
+
+    if (parameterID == DELAY_ID)
+        set_delayParams(delayValue = newValue);
+    if (parameterID == DELAYWETLEVEL_ID)
+        delay.setWetLevel(newValue);
+    if (parameterID == DELAYTIME_ID)
+        delay.setDelayTime(0, newValue);
+    if (parameterID == DELAYFEEDBACK_ID)
+        delay.setFeedback(newValue);
+
+    if (parameterID == CHORUS_ID)
+        chorusValue = newValue;
+    if (parameterID == CHORUSMIX_ID)
+        chorus.setMix(newValue);
+    if (parameterID == CHORUSRATE_ID)
+        chorus.setRate(static_cast<int>(newValue * 99));
+    if (parameterID == CHORUSDEPTH_ID)
+        chorus.setDepth(newValue);
+    if (parameterID == CHORUSCENTREDELAY_ID)
+        chorus.setCentreDelay(static_cast<int>(1 + newValue * 99));
+    if (parameterID == CHORUSFEEDBACK_ID)
+        chorus.setFeedback(newValue * 2 - 1);
+
+    if (parameterID == FLANGER_ID)
+        flangerValue = newValue;
+    if (parameterID == FLANGERMIX_ID)
+        flanger.setMix(newValue);
+    if (parameterID == FLANGERRATE_ID)
+        flanger.setRate(static_cast<int>(newValue * 99));
+    if (parameterID == FLANGERDEPTH_ID)
+        flanger.setDepth(newValue);
+    if (parameterID == FLANGERCENTREDELAY_ID)
+        flanger.setCentreDelay(static_cast<int>(1 + newValue * 99));
+    if (parameterID == FLANGERFEEDBACK_ID)
+        flanger.setFeedback(newValue * 2 - 1);
+
+    if (parameterID == REVERB_ID)
+        reverbValue = newValue;
+    if (parameterID == REVERBWETLEVEL_ID)
+    {
+        auto rev_params = reverb.getParameters();
+        rev_params.wetLevel = newValue;
+        reverb.setParameters(rev_params);
+    }
+    if (parameterID == REVERBDAMPING_ID)
+    {
+        auto rev_params = reverb.getParameters();
+        rev_params.damping = newValue;
+        reverb.setParameters(rev_params);
+    }
+    if (parameterID == REVERBROOMSIZE_ID)
+    {
+        auto rev_params = reverb.getParameters();
+        rev_params.roomSize = newValue;
+        reverb.setParameters(rev_params);
+    }
+
+    if (parameterID == AMPSTATE_ID)
+        ampState = static_cast<int>(newValue + 0.5f) == 1;
+    if (parameterID == LSTMSTATE_ID)
+        lstmState = static_cast<int>(newValue + 0.5f) == 1;
+    if (parameterID == IRSTATE_ID)
+        irState = static_cast<int>(newValue + 0.5f) == 1;
 }
 
 
 NeuralPiAudioProcessor::~NeuralPiAudioProcessor()
 {
+    apvts.removeParameterListener(MODEL_ID, this);
+    apvts.removeParameterListener(IR_ID, this);
+
+    apvts.removeParameterListener(GAIN_ID, this);
+    apvts.removeParameterListener(MASTER_ID, this);
+    apvts.removeParameterListener(BASS_ID, this);
+    apvts.removeParameterListener(MID_ID, this);
+    apvts.removeParameterListener(TREBLE_ID, this);
+    apvts.removeParameterListener(PRESENCE_ID, this);
+    
+    apvts.removeParameterListener(DELAY_ID, this);
+    apvts.removeParameterListener(DELAYWETLEVEL_ID, this);
+    apvts.removeParameterListener(DELAYTIME_ID, this);
+    apvts.removeParameterListener(DELAYFEEDBACK_ID, this);
+
+    apvts.removeParameterListener(CHORUS_ID, this);
+    apvts.removeParameterListener(CHORUSMIX_ID, this);
+    apvts.removeParameterListener(CHORUSRATE_ID, this);
+    apvts.removeParameterListener(CHORUSDEPTH_ID, this);
+    apvts.removeParameterListener(CHORUSCENTREDELAY_ID, this);
+    apvts.removeParameterListener(CHORUSFEEDBACK_ID, this);
+    
+    apvts.removeParameterListener(FLANGER_ID, this);
+    apvts.removeParameterListener(FLANGERMIX_ID, this);
+    apvts.removeParameterListener(FLANGERRATE_ID, this);
+    apvts.removeParameterListener(FLANGERDEPTH_ID, this);
+    apvts.removeParameterListener(FLANGERCENTREDELAY_ID, this);
+    apvts.removeParameterListener(FLANGERFEEDBACK_ID, this);
+
+    apvts.removeParameterListener(REVERB_ID, this);
+    apvts.removeParameterListener(REVERBWETLEVEL_ID, this);
+    apvts.removeParameterListener(REVERBDAMPING_ID, this);
+    apvts.removeParameterListener(REVERBROOMSIZE_ID, this);
+
+    apvts.removeParameterListener(AMPSTATE_ID, this);
+    apvts.removeParameterListener(LSTMSTATE_ID, this);
+    apvts.removeParameterListener(IRSTATE_ID, this);
 }
 
 //==============================================================================
@@ -167,16 +415,16 @@ int NeuralPiAudioProcessor::getCurrentProgram()
     return 0;
 }
 
-void NeuralPiAudioProcessor::setCurrentProgram (int index)
+void NeuralPiAudioProcessor::setCurrentProgram (int /*index*/)
 {
 }
 
-const String NeuralPiAudioProcessor::getProgramName (int index)
+const String NeuralPiAudioProcessor::getProgramName (int /*index*/)
 {
     return {};
 }
 
-void NeuralPiAudioProcessor::changeProgramName (int index, const String& newName)
+void NeuralPiAudioProcessor::changeProgramName (int /*index*/, const String& /*newName*/)
 {
 }
 
@@ -185,7 +433,6 @@ void NeuralPiAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
 {
     // Use this method as the place to do any pre-playback
     // initialisation that you need..
-    LSTM.reset();
 
     // set up DC blocker
     dcBlocker.coefficients = dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, 35.0f);
@@ -195,8 +442,14 @@ void NeuralPiAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     // Set up IR
     cabSimIR.prepare(spec);
 
+    LSTM.reset();
+    LSTM2.reset();
+
     // fx chain
-    fxChain.prepare(spec);    
+    delay.prepare(spec);
+    reverb.prepare(spec);
+    chorus.prepare(spec);
+    flanger.prepare(spec);
 }
 
 void NeuralPiAudioProcessor::releaseResources()
@@ -239,177 +492,147 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
     const int numInputChannels = getTotalNumInputChannels();
     const int sampleRate = getSampleRate();
 
-    auto block = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
-    auto context = juce::dsp::ProcessContextReplacing<float>(block);
+    dsp::AudioBlock<float> block = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
+    dsp::ProcessContextReplacing<float> context(block);
 
     // Amp =============================================================================
-    if (amp_state == 1) {
-        auto gain = static_cast<float> (gainParam->get());
-        auto master = static_cast<float> (masterParam->get());
-        // Note: Default 0.0 -> 1.0 param range is converted to +-12.0 here
-        auto bass = (static_cast<float> (bassParam->get() - 0.5) * 24.0);
-        auto mid = (static_cast<float> (midParam->get() - 0.5) * 24.0);
-        auto treble = (static_cast<float> (trebleParam->get() - 0.5) * 24.0);
-        auto presence = (static_cast<float> (presenceParam->get() - 0.5) * 24.0);
-
-        auto delay = (static_cast<float> (delayParam->get()));
-        auto reverb = (static_cast<float> (reverbParam->get()));
-        auto chorus = (static_cast<float> (chorusParam->get()));
-        auto flanger = (static_cast<float> (flangerParam->get()));
-
-        //auto model = static_cast<float> ();
-        model_index = modelParam->getIndex();//getModelIndex(model);
-
-        //auto ir = static_cast<float> (irParam->get());
-        ir_index = irParam->getIndex();//getIrIndex(ir);
-
+    if (ampState) {
+        
         // Applying gain adjustment for snapshot models
         if (LSTM.input_size == 1) {
-            buffer.applyGain(gain * 2.0);
-        } 
+            //buffer.applyGain(gain * 2.0); //TODO check
+            buffer.applyGain(0, 0, numSamples, gain * 2.5);
+        } else {
+            buffer.applyGain(0, 0, numSamples, 1.5);
+        }
 
-        // Process EQ
-        eq4band.setParameters(bass, mid, treble, presence);// Better to move this somewhere else? Only need to set when value changes
-        eq4band.process(buffer.getReadPointer(0), buffer.getWritePointer(0), midiMessages, numSamples, numInputChannels, sampleRate);
-
-        // Apply LSTM model
-        if (model_loaded == 1 && lstm_state == true) {
-            if (current_model_index != model_index) {
-                loadConfig(jsonFiles[model_index]);
-                current_model_index = model_index;
+        if (model_loaded && lstmState) {
+            if(currentLSTM == 0)
+            {
+                if (LSTM.input_size == 1)
+                    LSTM.process(buffer.getReadPointer(0), buffer.getWritePointer(0), numSamples);
+                else if (LSTM.input_size == 2)
+                    LSTM.process(buffer.getReadPointer(0), gain, buffer.getWritePointer(0), numSamples);
+                else if (LSTM.input_size == 3)
+                    LSTM.process(buffer.getReadPointer(0), gain, master, buffer.getWritePointer(0), numSamples);
             }
-
-            // Process LSTM based on input_size (snapshot model or conditioned model)
-            if (LSTM.input_size == 1) {
-                LSTM.process(buffer.getReadPointer(0), buffer.getWritePointer(0), numSamples);
-            }  
-            else if (LSTM.input_size == 2) {
-                LSTM.process(buffer.getReadPointer(0), gain, buffer.getWritePointer(0), numSamples);
-            }
-            else if (LSTM.input_size == 3) {
-                LSTM.process(buffer.getReadPointer(0), gain, master, buffer.getWritePointer(0), numSamples);
+            else
+            {
+                if (LSTM2.input_size == 1)
+                    LSTM2.process(buffer.getReadPointer(0), buffer.getWritePointer(0), numSamples);
+                else if (LSTM2.input_size == 2)
+                    LSTM2.process(buffer.getReadPointer(0), gain, buffer.getWritePointer(0), numSamples);
+                else if (LSTM2.input_size == 3)
+                    LSTM2.process(buffer.getReadPointer(0), gain, master, buffer.getWritePointer(0), numSamples);
             }
         }
 
+        dcBlocker.process(context);
+
+        eq4band.process(buffer.getReadPointer(0), buffer.getWritePointer(0), midiMessages, numSamples, numInputChannels, sampleRate);
+
+        // Process Delay, Reverb, Chorus and Flanger
+        if(delayValue < 0.01)
+            context.isBypassed = true;
+        set_delayParams(delayValue);
+        delay.process(context);
+        context.isBypassed = false;
+
+        if(chorusValue < 0.01)
+            context.isBypassed = true;
+        set_chorusParams(chorusValue);
+        chorus.process(context);
+        context.isBypassed = false;
+
+        if(flangerValue < 0.01)
+            context.isBypassed = true;
+        set_flangerParams(flangerValue);
+        flanger.process(context);
+        context.isBypassed = false;
+
+        if(reverbValue < 0.01)
+            context.isBypassed = true;
+        set_reverbParams(reverbValue);
+        reverb.process(context);
+        context.isBypassed = false;
+
+        //    Master Volume 
+		if (LSTM.input_size == 1 || LSTM.input_size == 2) {
+			buffer.applyGain(0, 0, numSamples, master * 2.0); // Adding volume range (2x) mainly for clean models
+		}
+
         // Process IR
-        if (ir_state == true && num_irs > 0) {
+        if (ir_loaded && irState) {
             if (current_ir_index != ir_index) {
                 loadIR(irFiles[ir_index]);
                 current_ir_index = ir_index;
             }
-            auto block = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
-            auto context = juce::dsp::ProcessContextReplacing<float>(block);
+            
             cabSimIR.process(context);
 
             // IR generally makes output quieter, add volume here to make ir on/off volume more even
-            buffer.applyGain(2.0);
+            buffer.applyGain(0, 0, numSamples, 2.0);
         }
+    }
 
-        //    Master Volume 
-		if (LSTM.input_size == 1 || LSTM.input_size == 2) {
-			buffer.applyGain(master * 2.0); // Adding volume range (2x) mainly for clean models
-		}
+    //Calculate averaged RMS over the last 10 seconds
+    float currentRMS = buffer.getRMSLevel(1, 0, numSamples);
+    float currentBufferDurationSeconds = static_cast<float>(numSamples) / sampleRate;
+    averagedRMS = (averagedRMS * 10 + currentRMS * currentBufferDurationSeconds) / (10 + currentBufferDurationSeconds);
 
-        // Process Delay, Reverb, Chorus and Flanger
-        set_delayParams(delay);
-        set_reverbParams(reverb);
-        set_chorusParams(chorus);
-        set_flangerParams(flanger);
-        fxChain.process(context);
+    //std::ofstream out("/tmp/debug", std::ios::app);
+    //out<<"current: "<<currentRMS<<"\tduration: "<<currentBufferDurationSeconds<<"\taveraged: "<<averagedRMS<<std::endl;
+
+    if(averagedRMS <= 0.1f && currentRMS < 0.3f) {
+        buffer.copyFrom(1, 0, buffer, 0, 0, numSamples);
+    } else {
+        averagedRMS = std::max(averagedRMS, 0.1f);
+
+        // store the sum in the left
+        buffer.addFrom(0, 0, buffer, 1, 0, buffer.getNumSamples());
+
+        // copy the combined left (0) to the right (1)
+        buffer.copyFrom(1, 0, buffer, 0, 0, buffer.getNumSamples());
+
+        // apply 0.5 gain to both
+        buffer.applyGain(0.5f);
     }
 
     // process DC blocker
-    auto monoBlock = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
+    /*auto monoBlock = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
     dcBlocker.process(dsp::ProcessContextReplacing<float>(monoBlock));
     
     for (int ch = 1; ch < buffer.getNumChannels(); ++ch)
-        buffer.copyFrom(ch, 0, buffer, 0, 0, buffer.getNumSamples());
+        buffer.copyFrom(ch, 0, buffer, 0, 0, buffer.getNumSamples());*/
 }
 
 //==============================================================================
 void NeuralPiAudioProcessor::getStateInformation(MemoryBlock& destData)
 {
-    MemoryOutputStream stream(destData, true);
-
-    stream.writeFloat(*gainParam);
-    stream.writeFloat(*masterParam);
-    stream.writeFloat(*bassParam);
-    stream.writeFloat(*midParam);
-    stream.writeFloat(*trebleParam);
-    stream.writeFloat(*presenceParam);
-    stream.writeInt(*modelParam);
-    stream.writeInt(*irParam);
-    stream.writeFloat(*delayParam);
-    stream.writeFloat(*reverbParam);
-    stream.writeFloat(*chorusParam);
-    stream.writeFloat(*flangerParam);
+    juce::ValueTree copyState = apvts.copyState();
+    std::unique_ptr<juce::XmlElement> xml = copyState.createXml();
+    copyXmlToBinary (*xml.get(), destData);
 }
 
 void NeuralPiAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    MemoryInputStream stream(data, static_cast<size_t> (sizeInBytes), false);
-
-    gainParam->setValueNotifyingHost(stream.readFloat());
-    masterParam->setValueNotifyingHost(stream.readFloat());
-    bassParam->setValueNotifyingHost(stream.readFloat());
-    midParam->setValueNotifyingHost(stream.readFloat());
-    trebleParam->setValueNotifyingHost(stream.readFloat());
-    presenceParam->setValueNotifyingHost(stream.readFloat());
-    modelParam->setValueNotifyingHost(stream.readInt());
-    irParam->setValueNotifyingHost(stream.readInt());
-    delayParam->setValueNotifyingHost(stream.readFloat());
-    reverbParam->setValueNotifyingHost(stream.readFloat());
-    chorusParam->setValueNotifyingHost(stream.readFloat());
-    flangerParam->setValueNotifyingHost(stream.readFloat());
+    std::unique_ptr<juce::XmlElement> xml = getXmlFromBinary (data, sizeInBytes);
+    juce::ValueTree copyState = juce::ValueTree::fromXml (*xml.get());
+    apvts.replaceState (copyState);
 }
 
-/*int NeuralPiAudioProcessor::getModelIndex(float model_param)
-{
-    int a = static_cast<int>(round(model_param * (num_models - 1.0)));
-    if (a > num_models - 1) {
-        a = num_models - 1;
-    }
-    else if (a < 0) {
-        a = 0;
-    }
-    return a;
-}
-
-int NeuralPiAudioProcessor::getIrIndex(float ir_param)
-{
-    int a = static_cast<int>(round(ir_param * (num_irs - 1.0)));
-    if (a > num_irs - 1) {
-        a = num_irs - 1;
-    }
-    else if (a < 0) {
-        a = 0;
-    }
-    return a;
-}*/
-
-void NeuralPiAudioProcessor::loadConfig(File configFile)
+void NeuralPiAudioProcessor::loadConfig(File configFile, RT_LSTM &out)
 {
     this->suspendProcessing(true);
     String path = configFile.getFullPathName();
-    char_filename = path.toUTF8();
+    const char *char_filename = path.toUTF8();
 
     try {
+        out.reset();
+
         // Load the JSON file into the correct model
-        LSTM.load_json(char_filename);
-    
-        // Check what the input size is and then update the GUI appropirately
-        if (LSTM.input_size == 1) {
-            params = 0;
-        }
-        else if (LSTM.input_size == 2) {
-            params = 1;
-        }
-        else if (LSTM.input_size == 3) {
-            params = 2;
-        }
-        
-        // If we are good: let's say so
-        model_loaded = 1;
+        out.load_json(char_filename);
+        model_loaded = true;
     }
     catch (const std::exception& e) {
         DBG("Unable to load json file: " + configFile.getFullPathName());
@@ -425,7 +648,7 @@ void NeuralPiAudioProcessor::loadIR(File irFile)
 
     try {
         cabSimIR.load(irFile);
-        ir_loaded = 1;
+        ir_loaded = true;
     }
     catch (const std::exception& e) {
         DBG("Unable to load IR file: " + irFile.getFullPathName());
@@ -455,34 +678,6 @@ void NeuralPiAudioProcessor::resetDirectoryIR(const File& file)
         file.findChildFiles(results, juce::File::findFiles, false, "*.wav");
         for (int i = results.size(); --i >= 0;)
             irFiles.push_back(File(results.getReference(i).getFullPathName()));
-    }
-}
-
-void NeuralPiAudioProcessor::addDirectory(const File& file)
-{
-    if (file.isDirectory())
-    {
-        juce::Array<juce::File> results;
-        file.findChildFiles(results, juce::File::findFiles, false, "*.json");
-        for (int i = results.size(); --i >= 0;)
-        {
-            jsonFiles.push_back(File(results.getReference(i).getFullPathName()));
-            num_models = num_models + 1.0;
-        }
-    }
-}
-
-void NeuralPiAudioProcessor::addDirectoryIR(const File& file)
-{
-    if (file.isDirectory())
-    {
-        juce::Array<juce::File> results;
-        file.findChildFiles(results, juce::File::findFiles, false, "*.wav");
-        for (int i = results.size(); --i >= 0;)
-        {
-            irFiles.push_back(File(results.getReference(i).getFullPathName()));
-            num_irs = num_irs + 1.0;
-        }
     }
 }
 
@@ -517,11 +712,6 @@ void NeuralPiAudioProcessor::setupDataDirectories()
     if (userAppDataTempFile_irs.existsAsFile()) {
         userAppDataTempFile_irs.deleteFile();
     }
-
-
-    // Add the tones directory and update tone list
-    addDirectory(userAppDataDirectory_tones);
-    addDirectoryIR(userAppDataDirectory_irs);
 }
 
 void NeuralPiAudioProcessor::installTones()
@@ -572,78 +762,59 @@ void NeuralPiAudioProcessor::installTones()
     
 }
 
-void NeuralPiAudioProcessor::set_ampEQ(float bass_slider, float mid_slider, float treble_slider, float presence_slider)
-{
-    eq4band.setParameters(bass_slider, mid_slider, treble_slider, presence_slider);
-}
-
 void NeuralPiAudioProcessor::set_delayParams(float paramValue)
 {
-    auto& del = fxChain.template get<delayIndex>();
-    del.setWetLevel(paramValue);
+    //auto& del = fxChain.template get<delayIndex>();
+    delay.setWetLevel(paramValue);
     // Setting delay time as larger steps to minimize clicking, and to start delay time at a reasonable value
     if (paramValue < 0.25) {
-        del.setDelayTime(0, 0.25);
+        delay.setDelayTime(0, 0.25);
     } else if (paramValue < 0.5) {
-        del.setDelayTime(0, 0.5);
+        delay.setDelayTime(0, 0.5);
     } else if (paramValue < 0.75) {
-        del.setDelayTime(0, 0.75);
+        delay.setDelayTime(0, 0.75);
     } else {
-        del.setDelayTime(0, 1.0);
+        delay.setDelayTime(0, 1.0);
     }
-    del.setFeedback(0.8-paramValue/2);
+    delay.setFeedback(0.8-paramValue/2);
 }
 
 
 void NeuralPiAudioProcessor::set_reverbParams(float paramValue)
 {
-    auto& rev = fxChain.template get<reverbIndex>();
-    auto rev_params = rev.getParameters();
+    //auto& rev = fxChain.template get<reverbIndex>();
+    auto rev_params = reverb.getParameters();
 
     // Sets reverb params as a function of a single reverb param value ( 0.0 to 1.0)
     rev_params.wetLevel = paramValue;
     rev_params.damping = 0.6 - paramValue/2; // decay is inverse of damping
     rev_params.roomSize = 0.8 - paramValue/2;
     //rev_params.width = paramValue;
-    rev.setParameters(rev_params);
+    reverb.setParameters(rev_params);
 }
 
 void NeuralPiAudioProcessor::set_chorusParams(float paramValue)
 {
-    auto& ch = fxChain.template get<chorusIndex>();
+    //auto& ch = fxChain.template get<chorusIndex>();
 
     // Sets chorus params as a function of a single chorus param value ( 0.0 to 1.0)
-    ch.setMix(paramValue);
-    ch.setRate(50); // 0 - 99
-    ch.setDepth(0.5);  //0.0f - 1.0f
-    ch.setCentreDelay(15);  //1 - 100
-    ch.setFeedback(0);  //-1.0f - 1.0f
+    chorus.setMix(paramValue);
+    chorus.setRate(50); // 0 - 99
+    chorus.setDepth(0.1);  //0.0f - 1.0f
+    chorus.setCentreDelay(8);  //1 - 100
+    chorus.setFeedback(0.1);  //-1.0f - 1.0f
 }
 
 void NeuralPiAudioProcessor::set_flangerParams(float paramValue)
 {
-    auto& ch = fxChain.template get<chorusIndex>();
+    //auto& ch = fxChain.template get<chorusIndex>();
 
-    // Sets chorus params as a function of a single chorus param value ( 0.0 to 1.0)
-    ch.setMix(paramValue);
-    ch.setRate(50); // 0 - 99
-    ch.setDepth(0.5);  //0.0f - 1.0f
-    ch.setCentreDelay(2);  //1 - 100
-    ch.setFeedback(0);  //-1.0f - 1.0f
-}
-
-float NeuralPiAudioProcessor::convertLogScale(float in_value, float x_min, float x_max, float y_min, float y_max)
-{
-    float b = log(y_max / y_min) / (x_max - x_min);
-    float a = y_max / exp(b * x_max);
-    float converted_value = a * exp(b * in_value);
-    return converted_value;
-}
-
-
-float NeuralPiAudioProcessor::decibelToLinear(float dbValue)
-{
-    return powf(10.0, dbValue/20.0);
+    // Sets flanger params as a function of a single chorus param value ( 0.0 to 1.0)
+    flanger.setMix(paramValue);
+    flanger.setRate(50); // 0 - 99
+    flanger.setDepth(0.1);  //0.0f - 1.0f
+    flanger.setCentreDelay(2);  //1 - 100
+    flanger.setFeedback(1);  //-1.0f - 1.0f
 }
 
 
