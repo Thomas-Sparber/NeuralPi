@@ -19,6 +19,10 @@ public:
     Eq4Band();
     void process (const float* inData, float* outData, MidiBuffer& midiMessages, const int numSamples, const int numInputChannels, const int sampleRate);
     void setParameters(float bass_slider, float mid_slider, float treble_slider, float presence_slider);
+    void setBass(float bass_slider);
+    void setMid(float mid_slider);
+    void setTreble(float treble_slider);
+    void setPresence(float presence_slider);
     void resetSampleRate();
 
 private:

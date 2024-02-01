@@ -41,10 +41,10 @@ void Eq4Band::process (const float* inData, float* outData,
 
 void Eq4Band::setParameters(float bass_slider, float mid_slider, float treble_slider, float presence_slider)
 {
-    lVol = exp(bass_slider / cAmpDB);
-    lmVol = exp(mid_slider / cAmpDB);
-    hmVol = exp(treble_slider / cAmpDB);
-    hVol = exp(presence_slider / cAmpDB);
+    setBass(bass_slider);
+    setMid(mid_slider);
+    setTreble(treble_slider);
+    setPresence(presence_slider);
     outVol = exp(0.0 / cAmpDB);
 
     xHI = exp(-2.0 * pi * treble_frequency / srate);
@@ -58,6 +58,26 @@ void Eq4Band::setParameters(float bass_slider, float mid_slider, float treble_sl
     xLOW = exp(-2.0 * pi * bass_frequency / srate);
     a0LOW = 1.0 - xLOW;
     b1LOW = -xLOW;
+}
+
+void Eq4Band::setBass(float bass_slider)
+{
+    lVol = exp(bass_slider / cAmpDB);
+}
+
+void Eq4Band::setMid(float mid_slider)
+{
+    lmVol = exp(mid_slider / cAmpDB);
+}
+
+void Eq4Band::setTreble(float treble_slider)
+{
+    hmVol = exp(treble_slider / cAmpDB);
+}
+
+void Eq4Band::setPresence(float presence_slider)
+{
+    hVol = exp(presence_slider / cAmpDB);
 }
 
 void Eq4Band::resetSampleRate()
