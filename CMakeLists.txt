@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(RTNEURAL_XSIMD ON CACHE BOOL "Use RTNeural with this backend" FORCE)
 add_subdirectory(modules/RTNeural)
+add_subdirectory(modules/NeuralAmpModelerCore)
+include_directories(modules/eigen)
 
 add_subdirectory(modules)
 include_directories(modules)
@@ -15,7 +17,7 @@ set(JUCE_FORMATS VST3)
 juce_add_plugin(NeuralPi
     COMPANY_NAME GuitarML
     PLUGIN_MANUFACTURER_CODE GtML
-    PLUGIN_CODE Npi3 
+    PLUGIN_CODE Npi3
     FORMATS ${JUCE_FORMATS}
     ProductName "NeuralPi"
     LV2_URI https://github.com/GuitarML/NeuralPi

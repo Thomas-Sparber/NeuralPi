@@ -1,4 +1,4 @@
-#include "RTNeuralLSTM.h"
+#include "NeuralNetwork.h"
 
 using Vec2d = std::vector<std::vector<float>>;
 
@@ -18,16 +18,11 @@ Vec2d transpose(const Vec2d& x)
 }
 
 template <typename T1>
-void RT_LSTM::set_weights_NeuralPi(T1 model, const char* filename)
+void set_weights_NeuralPi(T1 model, const nlohmann::json &weights_json)
 {
     // Initialize the correct model
     auto& lstm = (*model).template get<0>();
     auto& dense = (*model).template get<1>();
-
-    // read a JSON file
-    std::ifstream i2(filename);
-    nlohmann::json weights_json;
-    i2 >> weights_json;
 
     Vec2d lstm_weights_ih = weights_json["/state_dict/rec.weight_ih_l0"_json_pointer];
     lstm.setWVals(transpose(lstm_weights_ih));
@@ -52,16 +47,11 @@ void RT_LSTM::set_weights_NeuralPi(T1 model, const char* filename)
 }
 
 template <typename T1>
-void RT_LSTM::set_weights_Proteus(T1 model, const char* filename)
+void set_weights_Proteus(T1 model, const nlohmann::json &weights_json)
 {
     // Initialize the correct model
     auto& lstm = (*model).template get<0>();
     auto& dense = (*model).template get<1>();
-
-    // read a JSON file
-    std::ifstream i2(filename);
-    nlohmann::json weights_json;
-    i2 >> weights_json;
 
     Vec2d lstm_weights_ih = weights_json["/state_dict/rec.weight_ih_l0"_json_pointer];
     lstm.setWVals(transpose(lstm_weights_ih));
@@ -85,10 +75,10 @@ void RT_LSTM::set_weights_Proteus(T1 model, const char* filename)
     out<<"Proteus loaded"<<std::endl; 
 }
 
-void RT_LSTM::load_json(const char* filename)
+void NeuralNetwork::load_json(const juce::String &filename)
 {
     // Read in the JSON file
-    std::ifstream i2(filename);
+    std::ifstream i2(filename.toUTF8());
 	nlohmann::json weights_json;
 	i2 >> weights_json;
 
@@ -99,70 +89,100 @@ void RT_LSTM::load_json(const char* filename)
 
     if(hidden_size == 20)
     {
-        type = RT_LSTM_Type::NeuralPi;
+        type = NeuralNetworkType::NeuralPi;
         
         // Load the appropriate model
         if (input_size == 1) {
-            set_weights_NeuralPi(&model, filename);
+            set_weights_NeuralPi(&model, weights_json);
         }
         else if (input_size == 2) {
-            set_weights_NeuralPi(&model_cond1, filename);
+            set_weights_NeuralPi(&model_cond1, weights_json);
         } 
         else if (input_size == 3) {
-            set_weights_NeuralPi(&model_cond2, filename);
+            set_weights_NeuralPi(&model_cond2, weights_json);
         }
     }
     else if(hidden_size == 40)
     {
-        type = RT_LSTM_Type::Proteus;
+        type = NeuralNetworkType::Proteus;
 
         // Load the appropriate model
         if (input_size == 1) {
-            set_weights_Proteus(&model_proteus, filename);
+            set_weights_Proteus(&model_proteus, weights_json);
         }
         else if (input_size == 2) {
-            set_weights_Proteus(&model_proteus_cond1, filename);
+            set_weights_Proteus(&model_proteus_cond1, weights_json);
         } 
         else if (input_size == 3) {
-            set_weights_Proteus(&model_proteus_cond2, filename);
+            set_weights_Proteus(&model_proteus_cond2, weights_json);
         }
     }
 }
 
-
-void RT_LSTM::reset()
+void NeuralNetwork::loadNAM(const juce::String &filename)
 {
-    if(type == RT_LSTM_Type::NeuralPi)
+    std::filesystem::path path = std::string(filename.toUTF8());
+
+    type = NeuralNetworkType::NAM;
+    input_size = 1;
+    model_nam = nam::get_dsp(path);
+}
+
+void NeuralNetwork::loadConfig(const juce::String &filename)
+{
+    if(filename.toLowerCase().endsWith(".json"))
+    {
+        load_json(filename);
+    }
+    else if(filename.toLowerCase().endsWith(".nam"))
+    {
+        loadNAM(filename);
+    }
+}
+
+
+void NeuralNetwork::reset()
+{
+    if(type == NeuralNetworkType::NeuralPi)
     {
         model.reset();
         model_cond1.reset();
         model_cond2.reset();
     }
-    else
+    else if(type == NeuralNetworkType::Proteus)
     {
         model_proteus.reset();
         model_proteus_cond1.reset();
         model_proteus_cond2.reset();
     }
+    else
+    {
+        model_nam->prewarm();
+    }
 }
 
-void RT_LSTM::process(const float* inData, float* outData, int numSamples)
+void NeuralNetwork::process(const float* inData, float* outData, int numSamples)
 {
-    if(type == RT_LSTM_Type::NeuralPi)
+    if(type == NeuralNetworkType::NeuralPi)
     {
         for (int i = 0; i < numSamples; ++i)
             outData[i] = model.forward(inData + i) + inData[i];
     }
-    else
+    else if(type == NeuralNetworkType::Proteus)
     {
         for (int i = 0; i < numSamples; ++i)
             outData[i] = model_proteus.forward(inData + i) + inData[i];
     }
+    else
+    {
+        model_nam->process(inData, outData, numSamples);
+        model_nam->finalize_(numSamples);
+    }
 }
 
-void RT_LSTM::process(const float* inData, float param, float* outData, int numSamples)
+void NeuralNetwork::process(const float* inData, float param, float* outData, int numSamples)
 {
-    if(type == RT_LSTM_Type::NeuralPi)
+    if(type == NeuralNetworkType::NeuralPi)
     {
         for (int i = 0; i < numSamples; ++i) {
             inArray1[0] = inData[i];
@@ -170,7 +190,7 @@ void RT_LSTM::process(const float* inData, float param, float* outData, int numS
             outData[i] = model_cond1.forward(inArray1) + inData[i];
         }
     }
-    else
+    else if(type == NeuralNetworkType::Proteus)
     {
         for (int i = 0; i < numSamples; ++i) {
             inArray1[0] = inData[i];
@@ -178,11 +198,16 @@ void RT_LSTM::process(const float* inData, float param, float* outData, int numS
             outData[i] = model_proteus_cond1.forward(inArray1) + inData[i];
         }
     }
+    else
+    {
+        model_nam->process(inData, outData, numSamples);
+        model_nam->finalize_(numSamples);
+    }
 }
 
-void RT_LSTM::process(const float* inData, float param1, float param2, float* outData, int numSamples)
+void NeuralNetwork::process(const float* inData, float param1, float param2, float* outData, int numSamples)
 {
-    if(type == RT_LSTM_Type::NeuralPi)
+    if(type == NeuralNetworkType::NeuralPi)
     {
         for (int i = 0; i < numSamples; ++i) {
             inArray2[0] = inData[i];
@@ -191,7 +216,7 @@ void RT_LSTM::process(const float* inData, float param1, float param2, float* ou
             outData[i] = model_cond2.forward(inArray2) + inData[i];
         }
     }
-    else
+    else if(type == NeuralNetworkType::Proteus)
     {
         for (int i = 0; i < numSamples; ++i) {
             inArray2[0] = inData[i];
@@ -199,6 +224,11 @@ void RT_LSTM::process(const float* inData, float param1, float param2, float* ou
             inArray2[2] = param2;
             outData[i] = model_proteus_cond2.forward(inArray2) + inData[i];
         }
+    }
+    else
+    {
+        model_nam->process(inData, outData, numSamples);
+        model_nam->finalize_(numSamples);
     }
 }
 

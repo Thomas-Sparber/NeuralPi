@@ -8,3 +8,15 @@
 [submodule "modules/json"]
 	path = modules/json
 	url = https://github.com/nlohmann/json.git
+[submodule "modules/NeuralAmpModelerCore"]
+	path = modules/NeuralAmpModelerCore
+	url = https://github.com/Thomas-Sparber/NeuralAmpModelerCore.git
+[submodule "modules/chowdsp_utils"]
+	path = modules/chowdsp_utils
+	url = https://github.com/Chowdhury-DSP/chowdsp_utils
+[submodule "modules/eigen"]
+	path = modules/eigen
+	url = https://gitlab.com/libeigen/eigen
+[submodule "modules/libsamplerate"]
+	path = modules/libsamplerate
+	url = https://github.com/libsndfile/libsamplerate.git

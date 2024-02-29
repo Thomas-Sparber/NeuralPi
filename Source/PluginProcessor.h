@@ -8,8 +8,9 @@
   ==============================================================================
 */
 
+#include <chowdsp_dsp_utils/chowdsp_dsp_utils.h>
 #include <nlohmann/json.hpp>
-#include "RTNeuralLSTM.h"
+#include "NeuralNetwork.h"
 #include "Eq4Band.h"
 #include "CabSim.h"
 #include "Delay.h"
@@ -86,7 +87,7 @@
 #define LSTMSTATE_ID "lstmState"
 #define LSTMSTATE_NAME "LSTMState"
 #define IRSTATE_ID "irState"
-#define IRSTATE_NAME "irState"
+#define IRSTATE_NAME "IrState"
 
 //==============================================================================
 /**
@@ -140,7 +141,7 @@ public:
     void getStateInformation (MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    void loadConfig(File configFile, RT_LSTM &out);
+    void loadConfig(File configFile, NeuralNetwork &out);
     void loadIR(File irFile);
     void setupDataDirectories();
     void installTones();
@@ -153,7 +154,7 @@ public:
     void resetDirectory(const File& file);
     void resetDirectoryIR(const File& file);
 
-    std::vector<File> jsonFiles;
+    std::vector<File> configFiles;
     std::vector<File> irFiles;
     File userAppDataDirectory = File::getSpecialLocation(File::userDocumentsDirectory).getChildFile(JucePlugin_Manufacturer).getChildFile(JucePlugin_Name);
     File userAppDataDirectory_tones = userAppDataDirectory.getFullPathName() + "/tones";
@@ -184,9 +185,11 @@ public:
     float averagedRMS = 0;
 
 private:
-    std::atomic<int> currentLSTM = 0;
-    RT_LSTM LSTM;
-    RT_LSTM LSTM2;
+    chowdsp::ResampledProcess<chowdsp::ResamplingTypes::LanczosResampler<>> resampler;
+
+    std::atomic<int> currentNeuralNetwork = 0;
+    NeuralNetwork neuralNetwork1;
+    NeuralNetwork neuralNetwork2;
 
     Eq4Band eq4band; // Amp EQ
 

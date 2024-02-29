@@ -29,10 +29,10 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     setupDataDirectories();
     installTones();
     resetDirectory(userAppDataDirectory_tones);
-    // Sort jsonFiles alphabetically
-    std::sort(jsonFiles.begin(), jsonFiles.end());
-    if (jsonFiles.size() > 0) {
-        loadConfig(jsonFiles[current_model_index], LSTM);
+    // Sort configFiles alphabetically
+    std::sort(configFiles.begin(), configFiles.end());
+    if (configFiles.size() > 0) {
+        loadConfig(configFiles[current_model_index], neuralNetwork1);
     }
 
     resetDirectoryIR(userAppDataDirectory_irs);
@@ -45,9 +45,9 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     oscReceiver.modelCallback = [&] (juce::String value) {
         bool found = false;
 
-        for(size_t i = 0; i < jsonFiles.size(); i++) {
-            if(value == jsonFiles[i].getFileNameWithoutExtension()) {
-                float value = static_cast<float>(i) / jsonFiles.size();
+        for(size_t i = 0; i < configFiles.size(); i++) {
+            if(value == configFiles[i].getFileNameWithoutExtension()) {
+                float value = static_cast<float>(i) / configFiles.size();
                 apvts.getParameter(MODEL_ID)->setValueNotifyingHost(value);
                 found = true;
                 break;
@@ -57,10 +57,11 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
         if(!found)
         {
             File fullpath = userAppDataDirectory_tones.getFullPathName() + "/" + value + ".json";
+            if(!fullpath.existsAsFile())fullpath = userAppDataDirectory_tones.getFullPathName() + "/" + value + ".nam";
             if(fullpath.existsAsFile())
             {
-                jsonFiles.push_back(fullpath);
-                float value = static_cast<float>(jsonFiles.size() - 1) / jsonFiles.size();
+                configFiles.push_back(fullpath);
+                float value = static_cast<float>(configFiles.size() - 1) / configFiles.size();
                 apvts.getParameter(MODEL_ID)->setValueNotifyingHost(value);
             }
         }
@@ -219,17 +220,17 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
         
     if (parameterID == MODEL_ID)
     {
-        int model_index = jlimit(0, static_cast<int>(jsonFiles.size()-1), static_cast<int>(newValue * jsonFiles.size() + 0.5f));
+        int model_index = jlimit(0, static_cast<int>(configFiles.size()-1), static_cast<int>(newValue * configFiles.size() + 0.5f));
         
-        if(currentLSTM == 0)
+        if(currentNeuralNetwork == 0)
         {
-            loadConfig(jsonFiles[model_index], LSTM2);
-            currentLSTM = 1;
+            loadConfig(configFiles[model_index], neuralNetwork2);
+            currentNeuralNetwork = 1;
         }
         else
         {
-            loadConfig(jsonFiles[model_index], LSTM);
-            currentLSTM = 0;
+            loadConfig(configFiles[model_index], neuralNetwork1);
+            currentNeuralNetwork = 0;
         }
     }
     if (parameterID == IR_ID)
@@ -439,11 +440,17 @@ void NeuralPiAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     dsp::ProcessSpec spec{ sampleRate, static_cast<uint32> (samplesPerBlock), 2 };
     dcBlocker.prepare(spec);
 
+    constexpr double targetSampleRate = 44100.0;
+    resampler.prepareWithTargetSampleRate({ sampleRate, (uint32)samplesPerBlock, 1 }, targetSampleRate);
+
+    //std::ofstream of("/tmp/debug",std::ios_base::ate);
+    //of<<"Downsampling from "<<sampleRate<<" to "<<targetSampleRate<<std::endl;
+
     // Set up IR
     cabSimIR.prepare(spec);
 
-    LSTM.reset();
-    LSTM2.reset();
+    neuralNetwork1.reset();
+    neuralNetwork2.reset();
 
     // fx chain
     delay.prepare(spec);
@@ -498,33 +505,53 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
     // Amp =============================================================================
     if (ampState) {
         
-        // Applying gain adjustment for snapshot models
-        if (LSTM.input_size == 1) {
-            //buffer.applyGain(gain * 2.0); //TODO check
-            buffer.applyGain(0, 0, numSamples, gain * 2.5);
-        } else {
-            buffer.applyGain(0, 0, numSamples, 1.5);
-        }
+        
 
         if (model_loaded && lstmState) {
-            if(currentLSTM == 0)
+            //auto block44k = resampler.processIn(block);
+
+            auto readPointer = buffer.getReadPointer(0);
+            auto writePointer = buffer.getWritePointer(0);
+
+            //auto readPointer = block44k.getReadPointer(0);
+            //auto writePointer = block44k.getWritePointer(0);
+
+            if(currentNeuralNetwork == 0)
             {
-                if (LSTM.input_size == 1)
-                    LSTM.process(buffer.getReadPointer(0), buffer.getWritePointer(0), numSamples);
-                else if (LSTM.input_size == 2)
-                    LSTM.process(buffer.getReadPointer(0), gain, buffer.getWritePointer(0), numSamples);
-                else if (LSTM.input_size == 3)
-                    LSTM.process(buffer.getReadPointer(0), gain, master, buffer.getWritePointer(0), numSamples);
+                // Applying gain adjustment for snapshot models
+                if (neuralNetwork1.input_size == 1) {
+                    //buffer.applyGain(gain * 2.0); //TODO check
+                    buffer.applyGain(0, 0, numSamples, gain * 2.5);
+                } else {
+                    buffer.applyGain(0, 0, numSamples, 1.5);
+                }
+
+                if (neuralNetwork1.input_size == 1)
+                    neuralNetwork1.process(readPointer, writePointer, numSamples);
+                else if (neuralNetwork1.input_size == 2)
+                    neuralNetwork1.process(readPointer, gain, writePointer, numSamples);
+                else if (neuralNetwork1.input_size == 3)
+                    neuralNetwork1.process(readPointer, gain, master, writePointer, numSamples);
             }
             else
             {
-                if (LSTM2.input_size == 1)
-                    LSTM2.process(buffer.getReadPointer(0), buffer.getWritePointer(0), numSamples);
-                else if (LSTM2.input_size == 2)
-                    LSTM2.process(buffer.getReadPointer(0), gain, buffer.getWritePointer(0), numSamples);
-                else if (LSTM2.input_size == 3)
-                    LSTM2.process(buffer.getReadPointer(0), gain, master, buffer.getWritePointer(0), numSamples);
+                // Applying gain adjustment for snapshot models
+                if (neuralNetwork2.input_size == 1) {
+                    //buffer.applyGain(gain * 2.0); //TODO check
+                    buffer.applyGain(0, 0, numSamples, gain * 2.5);
+                } else {
+                    buffer.applyGain(0, 0, numSamples, 1.5);
+                }
+
+                if (neuralNetwork2.input_size == 1)
+                    neuralNetwork2.process(readPointer, writePointer, numSamples);
+                else if (neuralNetwork2.input_size == 2)
+                    neuralNetwork2.process(readPointer, gain, writePointer, numSamples);
+                else if (neuralNetwork2.input_size == 3)
+                    neuralNetwork2.process(readPointer, gain, master, writePointer, numSamples);
             }
+
+            //resampler.processOut(block44k, block);
         }
 
         dcBlocker.process(context);
@@ -557,7 +584,7 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
         context.isBypassed = false;
 
         //    Master Volume 
-		if (LSTM.input_size == 1 || LSTM.input_size == 2) {
+		if (currentNeuralNetwork == 0 && (neuralNetwork1.input_size == 1 || neuralNetwork1.input_size == 2) || currentNeuralNetwork == 1 && (neuralNetwork2.input_size == 1 || neuralNetwork2.input_size == 2)) {
 			buffer.applyGain(0, 0, numSamples, master * 2.0); // Adding volume range (2x) mainly for clean models
 		}
 
@@ -597,13 +624,6 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
         // apply 0.5 gain to both
         buffer.applyGain(0.5f);
     }
-
-    // process DC blocker
-    /*auto monoBlock = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
-    dcBlocker.process(dsp::ProcessContextReplacing<float>(monoBlock));
-    
-    for (int ch = 1; ch < buffer.getNumChannels(); ++ch)
-        buffer.copyFrom(ch, 0, buffer, 0, 0, buffer.getNumSamples());*/
 }
 
 //==============================================================================
@@ -621,30 +641,28 @@ void NeuralPiAudioProcessor::setStateInformation(const void* data, int sizeInByt
     apvts.replaceState (copyState);
 }
 
-void NeuralPiAudioProcessor::loadConfig(File configFile, RT_LSTM &out)
+void NeuralPiAudioProcessor::loadConfig(File configFile, NeuralNetwork &out)
 {
-    this->suspendProcessing(true);
-    String path = configFile.getFullPathName();
-    const char *char_filename = path.toUTF8();
+    //this->suspendProcessing(true);
 
     try {
         out.reset();
 
-        // Load the JSON file into the correct model
-        out.load_json(char_filename);
+        // Load the config file into the correct model
+        out.loadConfig(configFile.getFullPathName());
         model_loaded = true;
     }
     catch (const std::exception& e) {
-        DBG("Unable to load json file: " + configFile.getFullPathName());
+        DBG("Unable to load config file: " + configFile.getFullPathName());
         std::cout << e.what();
     }
 
-    this->suspendProcessing(false);
+    //this->suspendProcessing(false);
 }
 
 void NeuralPiAudioProcessor::loadIR(File irFile)
 {
-    this->suspendProcessing(true);
+    //this->suspendProcessing(true);
 
     try {
         cabSimIR.load(irFile);
@@ -654,18 +672,19 @@ void NeuralPiAudioProcessor::loadIR(File irFile)
         DBG("Unable to load IR file: " + irFile.getFullPathName());
         std::cout << e.what();
     }
-    this->suspendProcessing(false);
+    //this->suspendProcessing(false);
 }
 
 void NeuralPiAudioProcessor::resetDirectory(const File& file)
 {
-    jsonFiles.clear();
+    configFiles.clear();
     if (file.isDirectory())
     {
         juce::Array<juce::File> results;
         file.findChildFiles(results, juce::File::findFiles, false, "*.json");
+        file.findChildFiles(results, juce::File::findFiles, false, "*.nam");
         for (int i = results.size(); --i >= 0;)
-            jsonFiles.push_back(File(results.getReference(i).getFullPathName()));
+            configFiles.push_back(File(results.getReference(i).getFullPathName()));
     }
 }
 

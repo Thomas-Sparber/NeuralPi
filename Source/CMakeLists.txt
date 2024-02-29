@@ -7,8 +7,8 @@ target_sources(NeuralPi PRIVATE
 	Eq4Band.h
 	PluginProcessor.cpp
 	PluginProcessor.h
-	RTNeuralLSTM.cpp
-	RTNeuralLSTM.h
+	NeuralNetwork.cpp
+	NeuralNetwork.h
 )
 
 #target_precompile_headers(NeuralPi PRIVATE pch.h)

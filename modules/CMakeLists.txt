@@ -1,4 +1,5 @@
 add_subdirectory(JUCE)
+add_subdirectory(chowdsp_utils)
 
 include(cmake/SubprojectVersion.cmake)
 subproject_version(JUCE juce_version)
@@ -7,7 +8,7 @@ message(STATUS "VERSION for JUCE: ${juce_version}")
 include(cmake/WarningFlags.cmake)
 add_library(juce_plugin_modules STATIC)
 add_subdirectory(json)
-#add_subdirectory(RTNeural)
+include_directories(NeuralAmpModelerCore)
 include_directories(RTNeural)
 
 target_link_libraries(juce_plugin_modules
@@ -17,7 +18,11 @@ target_link_libraries(juce_plugin_modules
         juce::juce_audio_plugin_client
         juce::juce_dsp
 	juce::juce_osc
+        samplerate
+        chowdsp::chowdsp_dsp_utils
+        chowdsp::chowdsp_plugin_base
 	nlohmann_json::nlohmann_json
+	NAM
 	RTNeural
     PUBLIC
         juce::juce_recommended_config_flags
@@ -35,6 +40,7 @@ target_compile_definitions(juce_plugin_modules
         JucePlugin_Manufacturer="GuitarML"
         JucePlugin_VersionString="${CMAKE_PROJECT_VERSION}"
         JucePlugin_Name="${CMAKE_PROJECT_NAME}"
+        CHOWDSP_USE_LIBSAMPLERATE=1
     INTERFACE
         $<TARGET_PROPERTY:juce_plugin_modules,COMPILE_DEFINITIONS>
 )
