@@ -22,7 +22,8 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
 #endif
         .withOutput("Output", AudioChannelSet::stereo(), true)
 #endif
-    ), apvts (*this, nullptr, "Parameters", createParameters())
+    ),
+    apvts (*this, nullptr, "Parameters", createParameters())
 
 #endif
 {
@@ -32,14 +33,14 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     // Sort configFiles alphabetically
     std::sort(configFiles.begin(), configFiles.end());
     if (configFiles.size() > 0) {
-        loadConfig(configFiles[current_model_index], neuralNetwork1);
+        loadConfig(configFiles[model_index], neuralNetwork1);
     }
 
     resetDirectoryIR(userAppDataDirectory_irs);
     // Sort irFiles alphabetically
     std::sort(irFiles.begin(), irFiles.end());
     if (irFiles.size() > 0) {
-        loadIR(irFiles[current_ir_index]);
+        loadIR(irFiles[ir_index]);
     }
 
     oscReceiver.modelCallback = [&] (juce::String value) {
@@ -125,6 +126,7 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     oscReceiver.ampStateCallback =  [&] (bool value) { apvts.getParameter(AMPSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
     oscReceiver.lstmStateCallback = [&] (bool value) { apvts.getParameter(LSTMSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
     oscReceiver.irStateCallback =   [&] (bool value) { apvts.getParameter(IRSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.recordCallback =   [&] (bool value) { apvts.getParameter(RECORD_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
 
     apvts.addParameterListener (MODEL_ID, this);
     apvts.addParameterListener (IR_ID, this);
@@ -163,6 +165,7 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     apvts.addParameterListener (AMPSTATE_ID, this);
     apvts.addParameterListener (LSTMSTATE_ID, this);
     apvts.addParameterListener (IRSTATE_ID, this);
+    apvts.addParameterListener (RECORD_ID, this);
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout NeuralPiAudioProcessor::createParameters()
@@ -207,6 +210,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeuralPiAudioProcessor::crea
     params.add (std::make_unique<AudioParameterFloat>(AMPSTATE_ID,  AMPSTATE_NAME,  NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
     params.add (std::make_unique<AudioParameterFloat>(LSTMSTATE_ID, LSTMSTATE_NAME, NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
     params.add (std::make_unique<AudioParameterFloat>(IRSTATE_ID,   IRSTATE_NAME,   NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(RECORD_ID,    RECORD_NAME,    NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
 
     return params;
 }
@@ -220,22 +224,14 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
         
     if (parameterID == MODEL_ID)
     {
-        int model_index = jlimit(0, static_cast<int>(configFiles.size()-1), static_cast<int>(newValue * configFiles.size() + 0.5f));
-        
-        if(currentNeuralNetwork == 0)
-        {
-            loadConfig(configFiles[model_index], neuralNetwork2);
-            currentNeuralNetwork = 1;
-        }
-        else
-        {
-            loadConfig(configFiles[model_index], neuralNetwork1);
-            currentNeuralNetwork = 0;
-        }
+        model_index = jlimit(0, static_cast<int>(configFiles.size()-1), static_cast<int>(newValue * configFiles.size() + 0.5f));
+        changeModel(configFiles[model_index]);
     }
     if (parameterID == IR_ID)
+    {
         ir_index = jlimit(0, static_cast<int>(irFiles.size()-1), static_cast<int>(newValue * irFiles.size() + 0.5f));
-
+        loadIR(irFiles[ir_index]);
+    }
     if (parameterID == GAIN_ID)
         gain = newValue;
     if (parameterID == MASTER_ID)
@@ -262,7 +258,7 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
     }
 
     if (parameterID == DELAY_ID)
-        set_delayParams(delayValue = newValue);
+        set_delayParams(newValue);
     if (parameterID == DELAYWETLEVEL_ID)
         delay.setWetLevel(newValue);
     if (parameterID == DELAYTIME_ID)
@@ -271,7 +267,7 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
         delay.setFeedback(newValue);
 
     if (parameterID == CHORUS_ID)
-        chorusValue = newValue;
+        set_chorusParams(newValue);
     if (parameterID == CHORUSMIX_ID)
         chorus.setMix(newValue);
     if (parameterID == CHORUSRATE_ID)
@@ -284,7 +280,7 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
         chorus.setFeedback(newValue * 2 - 1);
 
     if (parameterID == FLANGER_ID)
-        flangerValue = newValue;
+        set_flangerParams(newValue);
     if (parameterID == FLANGERMIX_ID)
         flanger.setMix(newValue);
     if (parameterID == FLANGERRATE_ID)
@@ -297,7 +293,7 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
         flanger.setFeedback(newValue * 2 - 1);
 
     if (parameterID == REVERB_ID)
-        reverbValue = newValue;
+        set_reverbParams(newValue);
     if (parameterID == REVERBWETLEVEL_ID)
     {
         auto rev_params = reverb.getParameters();
@@ -318,11 +314,13 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
     }
 
     if (parameterID == AMPSTATE_ID)
-        ampState = static_cast<int>(newValue + 0.5f) == 1;
+        ampState = newValue >= 0.5f;
     if (parameterID == LSTMSTATE_ID)
-        lstmState = static_cast<int>(newValue + 0.5f) == 1;
+        lstmState = newValue >= 0.5f;
     if (parameterID == IRSTATE_ID)
-        irState = static_cast<int>(newValue + 0.5f) == 1;
+        irState = newValue >= 0.5f;
+    if (parameterID == RECORD_ID)
+        recording = newValue >= 0.5f;
 }
 
 
@@ -365,6 +363,7 @@ NeuralPiAudioProcessor::~NeuralPiAudioProcessor()
     apvts.removeParameterListener(AMPSTATE_ID, this);
     apvts.removeParameterListener(LSTMSTATE_ID, this);
     apvts.removeParameterListener(IRSTATE_ID, this);
+    apvts.removeParameterListener(RECORD_ID, this);
 }
 
 //==============================================================================
@@ -447,7 +446,8 @@ void NeuralPiAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlo
     //of<<"Downsampling from "<<sampleRate<<" to "<<targetSampleRate<<std::endl;
 
     // Set up IR
-    cabSimIR.prepare(spec);
+    cabSimIR1.prepare(spec);
+    cabSimIR2.prepare(spec);
 
     neuralNetwork1.reset();
     neuralNetwork2.reset();
@@ -504,18 +504,7 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
     // Amp =============================================================================
     if (ampState) {
-        
-        
-
         if (model_loaded && lstmState) {
-            //auto block44k = resampler.processIn(block);
-
-            auto readPointer = buffer.getReadPointer(0);
-            auto writePointer = buffer.getWritePointer(0);
-
-            //auto readPointer = block44k.getReadPointer(0);
-            //auto writePointer = block44k.getWritePointer(0);
-
             if(currentNeuralNetwork == 0)
             {
                 // Applying gain adjustment for snapshot models
@@ -526,12 +515,17 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
                     buffer.applyGain(0, 0, numSamples, 1.5);
                 }
 
-                if (neuralNetwork1.input_size == 1)
-                    neuralNetwork1.process(readPointer, writePointer, numSamples);
-                else if (neuralNetwork1.input_size == 2)
-                    neuralNetwork1.process(readPointer, gain, writePointer, numSamples);
-                else if (neuralNetwork1.input_size == 3)
-                    neuralNetwork1.process(readPointer, gain, master, writePointer, numSamples);
+                //auto block44k = resampler.processIn(block);
+
+                auto readPointer = buffer.getReadPointer(0);
+                auto writePointer = buffer.getWritePointer(0);
+
+                //auto readPointer = block44k.getReadPointer(0);
+                //auto writePointer = block44k.getWritePointer(0);
+
+                neuralNetwork1.process(readPointer, gain, master, writePointer, numSamples);
+
+                //resampler.processOut(block44k, block);
             }
             else
             {
@@ -543,15 +537,19 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
                     buffer.applyGain(0, 0, numSamples, 1.5);
                 }
 
-                if (neuralNetwork2.input_size == 1)
-                    neuralNetwork2.process(readPointer, writePointer, numSamples);
-                else if (neuralNetwork2.input_size == 2)
-                    neuralNetwork2.process(readPointer, gain, writePointer, numSamples);
-                else if (neuralNetwork2.input_size == 3)
-                    neuralNetwork2.process(readPointer, gain, master, writePointer, numSamples);
+                //auto block44k = resampler.processIn(block);
+
+                auto readPointer = buffer.getReadPointer(0);
+                auto writePointer = buffer.getWritePointer(0);
+
+                //auto readPointer = block44k.getReadPointer(0);
+                //auto writePointer = block44k.getWritePointer(0);
+
+                neuralNetwork2.process(readPointer, gain, master, writePointer, numSamples);
+
+                //resampler.processOut(block44k, block);
             }
 
-            //resampler.processOut(block44k, block);
         }
 
         dcBlocker.process(context);
@@ -559,29 +557,29 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
         eq4band.process(buffer.getReadPointer(0), buffer.getWritePointer(0), midiMessages, numSamples, numInputChannels, sampleRate);
 
         // Process Delay, Reverb, Chorus and Flanger
-        if(delayValue < 0.01)
-            context.isBypassed = true;
-        set_delayParams(delayValue);
+        //if(delayValue < 0.01)
+        //    context.isBypassed = true;
+        //set_delayParams(delayValue);
         delay.process(context);
-        context.isBypassed = false;
+        //context.isBypassed = false;
 
-        if(chorusValue < 0.01)
-            context.isBypassed = true;
-        set_chorusParams(chorusValue);
+        //if(chorusValue < 0.01)
+        //    context.isBypassed = true;
+        //set_chorusParams(chorusValue);
         chorus.process(context);
-        context.isBypassed = false;
+        //context.isBypassed = false;
 
-        if(flangerValue < 0.01)
-            context.isBypassed = true;
-        set_flangerParams(flangerValue);
+        //if(flangerValue < 0.01)
+        //    context.isBypassed = true;
+        //set_flangerParams(flangerValue);
         flanger.process(context);
-        context.isBypassed = false;
+        //context.isBypassed = false;
 
-        if(reverbValue < 0.01)
-            context.isBypassed = true;
-        set_reverbParams(reverbValue);
+        //if(reverbValue < 0.01)
+        //    context.isBypassed = true;
+        //set_reverbParams(reverbValue);
         reverb.process(context);
-        context.isBypassed = false;
+        //context.isBypassed = false;
 
         //    Master Volume 
 		if (currentNeuralNetwork == 0 && (neuralNetwork1.input_size == 1 || neuralNetwork1.input_size == 2) || currentNeuralNetwork == 1 && (neuralNetwork2.input_size == 1 || neuralNetwork2.input_size == 2)) {
@@ -590,12 +588,14 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
         // Process IR
         if (ir_loaded && irState) {
-            if (current_ir_index != ir_index) {
-                loadIR(irFiles[ir_index]);
-                current_ir_index = ir_index;
+            if(currentIR == 0)
+            {
+                cabSimIR1.process(context);
             }
-            
-            cabSimIR.process(context);
+            else
+            {
+                cabSimIR2.process(context);
+            }
 
             // IR generally makes output quieter, add volume here to make ir on/off volume more even
             buffer.applyGain(0, 0, numSamples, 2.0);
@@ -624,6 +624,25 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
         // apply 0.5 gain to both
         buffer.applyGain(0.5f);
     }
+
+    if(recording)
+    {
+        if(!writerOutput)
+        {
+            WavAudioFormat format;
+            outstreamOutput = std::make_unique<FileOutputStream>(juce::File("/udata/libs/output.wav"));
+            writerOutput.reset(format.createWriterFor(outstreamOutput.get(), sampleRate, buffer.getNumChannels(), 24, {}, 0));
+        }
+
+        writerOutput->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+    }
+
+    if(!recording && writerOutput)
+    {
+        writerOutput = nullptr;
+        outstreamOutput = nullptr;
+
+    }
 }
 
 //==============================================================================
@@ -641,10 +660,22 @@ void NeuralPiAudioProcessor::setStateInformation(const void* data, int sizeInByt
     apvts.replaceState (copyState);
 }
 
+void NeuralPiAudioProcessor::changeModel(File configFile)
+{
+    if(currentNeuralNetwork == 0)
+    {
+        loadConfig(configFile, neuralNetwork2);
+        currentNeuralNetwork = 1;
+    }
+    else
+    {
+        loadConfig(configFile, neuralNetwork1);
+        currentNeuralNetwork = 0;
+    }
+}
+
 void NeuralPiAudioProcessor::loadConfig(File configFile, NeuralNetwork &out)
 {
-    //this->suspendProcessing(true);
-
     try {
         out.reset();
 
@@ -656,23 +687,28 @@ void NeuralPiAudioProcessor::loadConfig(File configFile, NeuralNetwork &out)
         DBG("Unable to load config file: " + configFile.getFullPathName());
         std::cout << e.what();
     }
-
-    //this->suspendProcessing(false);
 }
 
 void NeuralPiAudioProcessor::loadIR(File irFile)
 {
-    //this->suspendProcessing(true);
-
     try {
-        cabSimIR.load(irFile);
+        if(currentIR == 0)
+        {
+            cabSimIR2.load(irFile);
+            currentIR = 1;
+        }
+        else
+        {
+            cabSimIR1.load(irFile);
+            currentIR = 0;
+        }
+
         ir_loaded = true;
     }
     catch (const std::exception& e) {
         DBG("Unable to load IR file: " + irFile.getFullPathName());
         std::cout << e.what();
     }
-    //this->suspendProcessing(false);
 }
 
 void NeuralPiAudioProcessor::resetDirectory(const File& file)
@@ -682,7 +718,6 @@ void NeuralPiAudioProcessor::resetDirectory(const File& file)
     {
         juce::Array<juce::File> results;
         file.findChildFiles(results, juce::File::findFiles, false, "*.json");
-        file.findChildFiles(results, juce::File::findFiles, false, "*.nam");
         for (int i = results.size(); --i >= 0;)
             configFiles.push_back(File(results.getReference(i).getFullPathName()));
     }

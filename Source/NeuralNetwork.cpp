@@ -41,9 +41,6 @@ void set_weights_NeuralPi(T1 model, const nlohmann::json &weights_json)
 
     std::vector<float> dense_bias = weights_json["/state_dict/lin.bias"_json_pointer];
     dense.setBias(dense_bias.data());
-
-    std::ofstream out("/tmp/debug", std::ios::app);
-    out<<"NeuralPi loaded"<<std::endl;
 }
 
 template <typename T1>
@@ -70,9 +67,6 @@ void set_weights_Proteus(T1 model, const nlohmann::json &weights_json)
 
     std::vector<float> dense_bias = weights_json["/state_dict/lin.bias"_json_pointer];
     dense.setBias(dense_bias.data());
-
-    std::ofstream out("/tmp/debug", std::ios::app);
-    out<<"Proteus loaded"<<std::endl; 
 }
 
 void NeuralNetwork::load_json(const juce::String &filename)
@@ -119,24 +113,11 @@ void NeuralNetwork::load_json(const juce::String &filename)
     }
 }
 
-void NeuralNetwork::loadNAM(const juce::String &filename)
-{
-    std::filesystem::path path = std::string(filename.toUTF8());
-
-    type = NeuralNetworkType::NAM;
-    input_size = 1;
-    model_nam = nam::get_dsp(path);
-}
-
 void NeuralNetwork::loadConfig(const juce::String &filename)
 {
     if(filename.toLowerCase().endsWith(".json"))
     {
         load_json(filename);
-    }
-    else if(filename.toLowerCase().endsWith(".nam"))
-    {
-        loadNAM(filename);
     }
 }
 
@@ -155,80 +136,61 @@ void NeuralNetwork::reset()
         model_proteus_cond1.reset();
         model_proteus_cond2.reset();
     }
-    else
-    {
-        model_nam->prewarm();
-    }
-}
-
-void NeuralNetwork::process(const float* inData, float* outData, int numSamples)
-{
-    if(type == NeuralNetworkType::NeuralPi)
-    {
-        for (int i = 0; i < numSamples; ++i)
-            outData[i] = model.forward(inData + i) + inData[i];
-    }
-    else if(type == NeuralNetworkType::Proteus)
-    {
-        for (int i = 0; i < numSamples; ++i)
-            outData[i] = model_proteus.forward(inData + i) + inData[i];
-    }
-    else
-    {
-        model_nam->process(inData, outData, numSamples);
-        model_nam->finalize_(numSamples);
-    }
-}
-
-void NeuralNetwork::process(const float* inData, float param, float* outData, int numSamples)
-{
-    if(type == NeuralNetworkType::NeuralPi)
-    {
-        for (int i = 0; i < numSamples; ++i) {
-            inArray1[0] = inData[i];
-            inArray1[1] = param;
-            outData[i] = model_cond1.forward(inArray1) + inData[i];
-        }
-    }
-    else if(type == NeuralNetworkType::Proteus)
-    {
-        for (int i = 0; i < numSamples; ++i) {
-            inArray1[0] = inData[i];
-            inArray1[1] = param;
-            outData[i] = model_proteus_cond1.forward(inArray1) + inData[i];
-        }
-    }
-    else
-    {
-        model_nam->process(inData, outData, numSamples);
-        model_nam->finalize_(numSamples);
-    }
 }
 
 void NeuralNetwork::process(const float* inData, float param1, float param2, float* outData, int numSamples)
 {
-    if(type == NeuralNetworkType::NeuralPi)
+    if(input_size == 1)
     {
-        for (int i = 0; i < numSamples; ++i) {
-            inArray2[0] = inData[i];
-            inArray2[1] = param1;
-            inArray2[2] = param2;
-            outData[i] = model_cond2.forward(inArray2) + inData[i];
+        if(type == NeuralNetworkType::NeuralPi)
+        {
+            for (int i = 0; i < numSamples; ++i)
+                outData[i] = model.forward(inData + i) + inData[i];
+        }
+        else if(type == NeuralNetworkType::Proteus)
+        {
+            for (int i = 0; i < numSamples; ++i)
+                outData[i] = model_proteus.forward(inData + i) + inData[i];
         }
     }
-    else if(type == NeuralNetworkType::Proteus)
+    else if(input_size == 2)
     {
-        for (int i = 0; i < numSamples; ++i) {
-            inArray2[0] = inData[i];
-            inArray2[1] = param1;
-            inArray2[2] = param2;
-            outData[i] = model_proteus_cond2.forward(inArray2) + inData[i];
+        if(type == NeuralNetworkType::NeuralPi)
+        {
+            for (int i = 0; i < numSamples; ++i) {
+                inArray1[0] = inData[i];
+                inArray1[1] = param1;
+                outData[i] = model_cond1.forward(inArray1) + inData[i];
+            }
+        }
+        else if(type == NeuralNetworkType::Proteus)
+        {
+            for (int i = 0; i < numSamples; ++i) {
+                inArray1[0] = inData[i];
+                inArray1[1] = param1;
+                outData[i] = model_proteus_cond1.forward(inArray1) + inData[i];
+            }
         }
     }
-    else
+    else if(input_size == 3)
     {
-        model_nam->process(inData, outData, numSamples);
-        model_nam->finalize_(numSamples);
+        if(type == NeuralNetworkType::NeuralPi)
+        {
+            for (int i = 0; i < numSamples; ++i) {
+                inArray2[0] = inData[i];
+                inArray2[1] = param1;
+                inArray2[2] = param2;
+                outData[i] = model_cond2.forward(inArray2) + inData[i];
+            }
+        }
+        else if(type == NeuralNetworkType::Proteus)
+        {
+            for (int i = 0; i < numSamples; ++i) {
+                inArray2[0] = inData[i];
+                inArray2[1] = param1;
+                inArray2[2] = param2;
+                outData[i] = model_proteus_cond2.forward(inArray2) + inData[i];
+            }
+        }
     }
 }
-

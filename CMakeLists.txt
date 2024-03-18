@@ -6,8 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(RTNEURAL_XSIMD ON CACHE BOOL "Use RTNeural with this backend" FORCE)
 add_subdirectory(modules/RTNeural)
-add_subdirectory(modules/NeuralAmpModelerCore)
-include_directories(modules/eigen)
 
 add_subdirectory(modules)
 include_directories(modules)
@@ -45,11 +43,3 @@ target_compile_definitions(NeuralPi
 target_link_libraries(NeuralPi PUBLIC
     juce_plugin_modules
 )
-
-# we need these flags for notarization on MacOS
-option(MACOS_RELEASE "Set build flags for MacOS Release" OFF)
-if(MACOS_RELEASE)
-    message(STATUS "Setting MacOS release flags...")
-    set_target_properties(NeuralPi_Standalone PROPERTIES
-        XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME YES)
-endif()

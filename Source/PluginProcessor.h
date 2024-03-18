@@ -10,6 +10,7 @@
 
 #include <chowdsp_dsp_utils/chowdsp_dsp_utils.h>
 #include <nlohmann/json.hpp>
+
 #include "NeuralNetwork.h"
 #include "Eq4Band.h"
 #include "CabSim.h"
@@ -88,6 +89,8 @@
 #define LSTMSTATE_NAME "LSTMState"
 #define IRSTATE_ID "irState"
 #define IRSTATE_NAME "IrState"
+#define RECORD_ID "record"
+#define RECORD_NAME "Record"
 
 //==============================================================================
 /**
@@ -141,10 +144,12 @@ public:
     void getStateInformation (MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    void changeModel(File configFile);
     void loadConfig(File configFile, NeuralNetwork &out);
     void loadIR(File irFile);
     void setupDataDirectories();
     void installTones();
+    void startRecording(File configFile);
 
     void set_delayParams(float paramValue);
     void set_reverbParams(float paramValue);
@@ -165,7 +170,7 @@ public:
     float delayValue = 0.0f;
     float chorusValue = 0.0f;
     float flangerValue = 0.0f;
-    float reverbValue = 0.05;
+    float reverbValue = 0.0f;
 
     bool ampState = true;
     bool lstmState = true;
@@ -173,11 +178,9 @@ public:
 
     // Pedal/amp states
     bool model_loaded = false;
-    int current_model_index = 0;
     int model_index = 0;
 
     bool ir_loaded = false;
-    int current_ir_index = 0;
     int ir_index = 0;
 
     juce::AudioProcessorValueTreeState apvts;
@@ -185,6 +188,10 @@ public:
     float averagedRMS = 0;
 
 private:
+    bool recording = false;
+    std::unique_ptr<FileOutputStream> outstreamOutput;
+    std::unique_ptr<AudioFormatWriter> writerOutput;
+
     chowdsp::ResampledProcess<chowdsp::ResamplingTypes::LanczosResampler<>> resampler;
 
     std::atomic<int> currentNeuralNetwork = 0;
@@ -196,7 +203,9 @@ private:
     dsp::IIR::Filter<float> dcBlocker;
 
     // IR processing
-    CabSim cabSimIR;
+    std::atomic<int> currentIR;
+    CabSim cabSimIR1;
+    CabSim cabSimIR2;
 
     AmpOSCReceiver oscReceiver;
 

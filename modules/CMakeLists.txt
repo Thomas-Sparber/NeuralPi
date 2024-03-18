@@ -8,7 +8,6 @@ message(STATUS "VERSION for JUCE: ${juce_version}")
 include(cmake/WarningFlags.cmake)
 add_library(juce_plugin_modules STATIC)
 add_subdirectory(json)
-include_directories(NeuralAmpModelerCore)
 include_directories(RTNeural)
 
 target_link_libraries(juce_plugin_modules
@@ -17,13 +16,12 @@ target_link_libraries(juce_plugin_modules
         juce::juce_audio_utils
         juce::juce_audio_plugin_client
         juce::juce_dsp
-	juce::juce_osc
+	    juce::juce_osc
         samplerate
         chowdsp::chowdsp_dsp_utils
         chowdsp::chowdsp_plugin_base
-	nlohmann_json::nlohmann_json
-	NAM
-	RTNeural
+	    nlohmann_json::nlohmann_json
+	    RTNeural
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

@@ -2,15 +2,11 @@
 
 #include <RTNeural/RTNeural.h>
 
-#define NAM_SAMPLE_FLOAT
-#include <NAM/dsp.h>
-
 #include "../JuceLibraryCode/JuceHeader.h"
 
 enum class NeuralNetworkType {
     NeuralPi,
-    Proteus,
-    NAM
+    Proteus
 };
 
 
@@ -27,20 +23,28 @@ public:
     NeuralNetwork() = default;
 
     void reset();
-    void load_json(const juce::String &filename);
-
-    void loadNAM(const juce::String &filename);
 
     void loadConfig(const juce::String &filename);
 
-    void process(const float* inData, float* outData, int numSamples);
-    void process(const float* inData, float param, float* outData, int numSamples);
+    void process(const float* inData, float* outData, int numSamples)
+    {
+        process(inData, 0, 0, outData, numSamples);
+    }
+
+    void process(const float* inData, float param, float* outData, int numSamples)
+    {
+        process(inData, param, 0, outData, numSamples);
+    }
+
     void process(const float* inData, float param1, float param2, float* outData, int numSamples);
 
     int input_size = 1;
 
     NeuralNetworkType type;
-    
+
+private:
+    void load_json(const juce::String &filename);
+
 private:
     NeuralPiLSTM<1, 20> model;
 
@@ -54,9 +58,8 @@ private:
 
     NeuralPiLSTM<3, 40> model_proteus_cond2;
 
-    std::unique_ptr<nam::DSP> model_nam;
-    
     // Pre-Allowcate arrays for feeding the models
-    float inArray1[2] = { 0.0, 0.0 };
-    float inArray2[3] = { 0.0, 0.0, 0.0 };
+    float inArray1[2] = { 0.0f, 0.0f };
+    float inArray2[3] = { 0.0f, 0.0f, 0.0f };
+
 };

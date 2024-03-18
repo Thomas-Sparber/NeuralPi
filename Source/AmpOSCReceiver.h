@@ -55,6 +55,7 @@ public:
         ampStateAddressPattern = "/parameter/NeuralPi/AmpState";
         lstmStateAddressPattern = "/parameter/NeuralPi/LSTMState";
         irStateAddressPattern = "/parameter/NeuralPi/IrState";
+        recordAddressPattern = "/parameter/NeuralPi/Record";
 
         addListener(this, gainAddressPattern);
         addListener(this, masterAddressPattern);
@@ -93,6 +94,7 @@ public:
         addListener(this, ampStateAddressPattern);
         addListener(this, lstmStateAddressPattern);
         addListener(this, irStateAddressPattern);
+        addListener(this, recordAddressPattern);
     }
 
     void oscMessageReceived (const juce::OSCMessage& message) override
@@ -170,6 +172,8 @@ public:
                 lstmStateCallback(message[0].getFloat32() > 0.5f);
             if (message.getAddressPattern().matches(irStateAddressPattern))
                 irStateCallback(message[0].getFloat32() > 0.5f);
+            if (message.getAddressPattern().matches(recordAddressPattern))
+                recordCallback(message[0].getFloat32() > 0.5f);
         }
 
         if (message.size() == 1 && message[0].isInt32())
@@ -237,6 +241,8 @@ public:
                 lstmStateCallback(message[0].getInt32() == 1);
             if (message.getAddressPattern().matches(irStateAddressPattern))
                 irStateCallback(message[0].getInt32() == 1);
+            if (message.getAddressPattern().matches(recordAddressPattern))
+                recordCallback(message[0].getInt32() == 1);
         }
     }
 
@@ -278,6 +284,7 @@ public:
     std::function<void(bool)> ampStateCallback;
     std::function<void(bool)> lstmStateCallback;
     std::function<void(bool)> irStateCallback;
+    std::function<void(bool)> recordCallback;
 
 private:
     String gainAddressPattern;
@@ -317,5 +324,6 @@ private:
     String ampStateAddressPattern;
     String lstmStateAddressPattern;
     String irStateAddressPattern;
+    String recordAddressPattern;
 
 }; //end class AmpOSCReceiver
