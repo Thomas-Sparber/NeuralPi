@@ -189,8 +189,10 @@ public:
 
 private:
     bool recording = false;
-    std::unique_ptr<FileOutputStream> outstreamOutput;
-    std::unique_ptr<AudioFormatWriter> writerOutput;
+    TimeSliceThread backgroundThread { "Audio Recorder Thread" };
+    std::unique_ptr<AudioFormatWriter::ThreadedWriter> threadedWriter;
+    CriticalSection writerLock;
+    std::atomic<AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
 
     chowdsp::ResampledProcess<chowdsp::ResamplingTypes::LanczosResampler<>> resampler;
 

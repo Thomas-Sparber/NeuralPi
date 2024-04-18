@@ -27,6 +27,8 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
 
 #endif
 {
+    backgroundThread.startThread();
+
     setupDataDirectories();
     installTones();
     resetDirectory(userAppDataDirectory_tones);
@@ -602,15 +604,63 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
         }
     }
 
+    if(recording)
+    {
+        if(activeWriter.load() == nullptr)
+        {
+            juce::File file("/udata/libs/output.wav");
+            auto fileStream = std::unique_ptr<FileOutputStream>(file.createOutputStream());
+            fileStream->setPosition(0);
+            fileStream->truncate();
+
+            WavAudioFormat wavFormat;
+            auto writer = wavFormat.createWriterFor(fileStream.get(), sampleRate, buffer.getNumChannels(), 24, {}, 0);
+            fileStream.release();
+
+            threadedWriter.reset (new AudioFormatWriter::ThreadedWriter (writer, backgroundThread, 32768));
+
+            const ScopedLock sl (writerLock);
+            activeWriter = threadedWriter.get();
+
+
+            /*outstreamOutput = std::make_unique<FileOutputStream>(juce::File());
+
+            if(outstreamOutput->openedOk())
+            {
+                outstreamOutput->setPosition(0);
+                outstreamOutput->truncate();
+            }
+
+            writerOutput.reset(wavFormat.createWriterFor(outstreamOutput.get(), sampleRate, buffer.getNumChannels(), 24, {}, 0));*/
+        }
+ 
+        //writerOutput->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+
+        const ScopedLock sl(writerLock);
+        activeWriter.load()->write(buffer.getArrayOfReadPointers(), numSamples);
+    }
+
+    if(!recording && activeWriter.load() != nullptr)
+    {
+        /*writerOutput = nullptr;
+        outstreamOutput = nullptr;*/
+
+        {
+            const ScopedLock sl (writerLock);
+            activeWriter = nullptr;
+        }
+
+        threadedWriter.reset();
+
+    }
+
+
     //Calculate averaged RMS over the last 10 seconds
     float currentRMS = buffer.getRMSLevel(1, 0, numSamples);
     float currentBufferDurationSeconds = static_cast<float>(numSamples) / sampleRate;
     averagedRMS = (averagedRMS * 10 + currentRMS * currentBufferDurationSeconds) / (10 + currentBufferDurationSeconds);
 
-    //std::ofstream out("/tmp/debug", std::ios::app);
-    //out<<"current: "<<currentRMS<<"\tduration: "<<currentBufferDurationSeconds<<"\taveraged: "<<averagedRMS<<std::endl;
-
-    if(averagedRMS <= 0.1f && currentRMS < 0.3f) {
+    if(averagedRMS <= 0.01f && currentRMS < 0.03f) {
         buffer.copyFrom(1, 0, buffer, 0, 0, numSamples);
     } else {
         averagedRMS = std::max(averagedRMS, 0.1f);
@@ -623,25 +673,6 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
         // apply 0.5 gain to both
         buffer.applyGain(0.5f);
-    }
-
-    if(recording)
-    {
-        if(!writerOutput)
-        {
-            WavAudioFormat format;
-            outstreamOutput = std::make_unique<FileOutputStream>(juce::File("/udata/libs/output.wav"));
-            writerOutput.reset(format.createWriterFor(outstreamOutput.get(), sampleRate, buffer.getNumChannels(), 24, {}, 0));
-        }
-
-        writerOutput->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
-    }
-
-    if(!recording && writerOutput)
-    {
-        writerOutput = nullptr;
-        outstreamOutput = nullptr;
-
     }
 }
 
@@ -694,12 +725,18 @@ void NeuralPiAudioProcessor::loadIR(File irFile)
     try {
         if(currentIR == 0)
         {
-            cabSimIR2.load(irFile);
+            cabSimIR2.loadImpulseResponse(irFile,
+                CabSim::Stereo::yes,
+                CabSim::Trim::no,
+                0); // Set to 0 to use the full size of IR with no trimming
             currentIR = 1;
         }
         else
         {
-            cabSimIR1.load(irFile);
+            cabSimIR1.loadImpulseResponse(irFile,
+                CabSim::Stereo::yes,
+                CabSim::Trim::no,
+                0); // Set to 0 to use the full size of IR with no trimming
             currentIR = 0;
         }
 
