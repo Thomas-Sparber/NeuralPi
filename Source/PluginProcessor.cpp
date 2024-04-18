@@ -94,6 +94,8 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
         }
     };
 
+    oscReceiver.irWetLevelCallback = [&] (float value) { apvts.getParameter(IRWETLEVEL_ID)->setValueNotifyingHost(value); };
+
     oscReceiver.gainCallback =      [&] (float value) { apvts.getParameter(GAIN_ID)->setValueNotifyingHost(value); };
     oscReceiver.masterCallback =    [&] (float value) { apvts.getParameter(MASTER_ID)->setValueNotifyingHost(value); };
     oscReceiver.bassCallback =      [&] (float value) { apvts.getParameter(BASS_ID)->setValueNotifyingHost(value); };
@@ -125,13 +127,14 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
     oscReceiver.reverbDampingCallback =  [&] (float value) { apvts.getParameter(REVERBDAMPING_ID)->setValueNotifyingHost(value); };
     oscReceiver.reverbRoomSizeCallback = [&] (float value) { apvts.getParameter(REVERBROOMSIZE_ID)->setValueNotifyingHost(value); };
 
-    oscReceiver.ampStateCallback =  [&] (bool value) { apvts.getParameter(AMPSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
-    oscReceiver.lstmStateCallback = [&] (bool value) { apvts.getParameter(LSTMSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
-    oscReceiver.irStateCallback =   [&] (bool value) { apvts.getParameter(IRSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
-    oscReceiver.recordCallback =   [&] (bool value) { apvts.getParameter(RECORD_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.ampStateCallback =   [&] (bool value) { apvts.getParameter(AMPSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.lstmStateCallback =  [&] (bool value) { apvts.getParameter(LSTMSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.irStateCallback =    [&] (bool value) { apvts.getParameter(IRSTATE_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
+    oscReceiver.recordCallback =     [&] (bool value) { apvts.getParameter(RECORD_ID)->setValueNotifyingHost(value ? 0.0f : 1.0f); };
 
     apvts.addParameterListener (MODEL_ID, this);
     apvts.addParameterListener (IR_ID, this);
+    apvts.addParameterListener (IRWETLEVEL_ID, this);
 
     apvts.addParameterListener (GAIN_ID, this);
     apvts.addParameterListener (MASTER_ID, this);
@@ -177,6 +180,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeuralPiAudioProcessor::crea
     // initialize parameters:
     params.add (std::make_unique<AudioParameterFloat>(MODEL_ID,     MODEL_NAME,     NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 0.0f));
     params.add (std::make_unique<AudioParameterFloat>(IR_ID,        IR_NAME,        NormalisableRange<float>(0.0f, 1.0f, 0.0001f), 0.0f));
+    params.add (std::make_unique<AudioParameterFloat>(IRWETLEVEL_ID, IRWETLEVEL_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.01f), 1.0f));
     
     params.add (std::make_unique<AudioParameterFloat>(GAIN_ID,      GAIN_NAME,      NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
     params.add (std::make_unique<AudioParameterFloat>(MASTER_ID,    MASTER_NAME,    NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.5f));
@@ -209,10 +213,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NeuralPiAudioProcessor::crea
     params.add (std::make_unique<AudioParameterFloat>(REVERBDAMPING_ID,  REVERBDAMPING_NAME,  NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
     params.add (std::make_unique<AudioParameterFloat>(REVERBROOMSIZE_ID, REVERBROOMSIZE_NAME, NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.0f));
 
-    params.add (std::make_unique<AudioParameterFloat>(AMPSTATE_ID,  AMPSTATE_NAME,  NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
-    params.add (std::make_unique<AudioParameterFloat>(LSTMSTATE_ID, LSTMSTATE_NAME, NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
-    params.add (std::make_unique<AudioParameterFloat>(IRSTATE_ID,   IRSTATE_NAME,   NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
-    params.add (std::make_unique<AudioParameterFloat>(RECORD_ID,    RECORD_NAME,    NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(AMPSTATE_ID,   AMPSTATE_NAME,   NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(LSTMSTATE_ID,  LSTMSTATE_NAME,  NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(IRSTATE_ID,    IRSTATE_NAME,    NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
+    params.add (std::make_unique<AudioParameterFloat>(RECORD_ID,     RECORD_NAME,     NormalisableRange<float>(0.0f, 1.0f, 1.0f), 1.0f));
 
     return params;
 }
@@ -234,6 +238,12 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
         ir_index = jlimit(0, static_cast<int>(irFiles.size()-1), static_cast<int>(newValue * irFiles.size() + 0.5f));
         loadIR(irFiles[ir_index]);
     }
+    if (parameterID == IRWETLEVEL_ID)
+    {
+        cabSimIR1.setWetLevel(newValue);
+        cabSimIR2.setWetLevel(newValue);
+    }
+
     if (parameterID == GAIN_ID)
         gain = newValue;
     if (parameterID == MASTER_ID)
@@ -330,6 +340,7 @@ NeuralPiAudioProcessor::~NeuralPiAudioProcessor()
 {
     apvts.removeParameterListener(MODEL_ID, this);
     apvts.removeParameterListener(IR_ID, this);
+    apvts.removeParameterListener(IRWETLEVEL_ID, this);
 
     apvts.removeParameterListener(GAIN_ID, this);
     apvts.removeParameterListener(MASTER_ID, this);
@@ -598,9 +609,6 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
             {
                 cabSimIR2.process(context);
             }
-
-            // IR generally makes output quieter, add volume here to make ir on/off volume more even
-            buffer.applyGain(0, 0, numSamples, 2.0);
         }
     }
 

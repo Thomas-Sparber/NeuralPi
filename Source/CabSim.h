@@ -262,6 +262,8 @@ public:
     */
     int getLatency() const;
 
+    void setWetLevel(float wetLevel);
+
 private:
     //==============================================================================
     CabSim (const Latency&,
@@ -283,12 +285,17 @@ private:
 
         void reset();
 
+        void setWetLevel(float wetLevel);
+
+        void applyWetLevel();
+
     private:
-        std::array<SmoothedValue<float>, 2> volumeDry, volumeWet;
+        std::array<SmoothedValue<float>, 2> volumeDry, volumeWet, volumeCorrection;
         dsp::AudioBlock<float> dryBlock;
         HeapBlock<char> dryBlockStorage;
         double sampleRate = 0;
         bool currentIsBypassed = false;
+        float wetLevel = 1.0f;
     };
 
     //==============================================================================

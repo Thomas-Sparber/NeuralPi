@@ -18,6 +18,10 @@ public:
             DBG("Error: could not connect to UDP port 9001.");
         }
         
+        modelAddressPattern = "/parameter/NeuralPi/Model";
+        irAddressPattern = "/parameter/NeuralPi/Ir";
+        irWetLevelAddressPattern = "/parameter/NeuralPi/IrWetLevel";
+
         gainAddressPattern = "/parameter/NeuralPi/Gain";
         masterAddressPattern = "/parameter/NeuralPi/Master";
         bassAddressPattern = "/parameter/NeuralPi/Bass";
@@ -48,14 +52,15 @@ public:
         reverbWetLevelAddressPattern = "/parameter/NeuralPi/ReverbWetLevel";
         reverbDampingAddressPattern = "/parameter/NeuralPi/ReverbDamping";
         reverbRoomSizeAddressPattern = "/parameter/NeuralPi/ReverbRoomSize";
-        
-        modelAddressPattern = "/parameter/NeuralPi/Model";
-        irAddressPattern = "/parameter/NeuralPi/Ir";
 
         ampStateAddressPattern = "/parameter/NeuralPi/AmpState";
         lstmStateAddressPattern = "/parameter/NeuralPi/LSTMState";
         irStateAddressPattern = "/parameter/NeuralPi/IrState";
         recordAddressPattern = "/parameter/NeuralPi/Record";
+
+        addListener(this, modelAddressPattern);
+        addListener(this, irAddressPattern);
+        addListener(this, irWetLevelAddressPattern);
 
         addListener(this, gainAddressPattern);
         addListener(this, masterAddressPattern);
@@ -88,9 +93,6 @@ public:
         addListener(this, reverbDampingAddressPattern);
         addListener(this, reverbRoomSizeAddressPattern);
 
-        addListener(this, modelAddressPattern);
-        addListener(this, irAddressPattern);
-
         addListener(this, ampStateAddressPattern);
         addListener(this, lstmStateAddressPattern);
         addListener(this, irStateAddressPattern);
@@ -109,6 +111,9 @@ public:
 
         if (message.size() == 1 && message[0].isFloat32())
         {
+            if (message.getAddressPattern().matches(irWetLevelAddressPattern))
+                irWetLevelCallback(jlimit(0.0f, 1.0f, message[0].getFloat32()));
+
             if (message.getAddressPattern().matches(gainAddressPattern))
                 gainCallback(jlimit(0.0f, 1.0f, message[0].getFloat32()));
             if (message.getAddressPattern().matches(masterAddressPattern))
@@ -178,6 +183,9 @@ public:
 
         if (message.size() == 1 && message[0].isInt32())
         {
+            if (message.getAddressPattern().matches(irWetLevelAddressPattern))
+                irWetLevelCallback(jlimit(0, 1, message[0].getInt32()));
+
             if (message.getAddressPattern().matches(gainAddressPattern))
                 gainCallback(jlimit(0, 1, message[0].getInt32()));
             if (message.getAddressPattern().matches(masterAddressPattern))
@@ -247,6 +255,10 @@ public:
     }
 
 public:
+    std::function<void(juce::String)> modelCallback;
+    std::function<void(juce::String)> irCallback;
+    std::function<void(float)> irWetLevelCallback;
+
     std::function<void(float)> gainCallback;
     std::function<void(float)> masterCallback;
     std::function<void(float)> bassCallback;
@@ -278,15 +290,16 @@ public:
     std::function<void(float)> reverbDampingCallback;
     std::function<void(float)> reverbRoomSizeCallback;
 
-    std::function<void(juce::String)> modelCallback;
-    std::function<void(juce::String)> irCallback;
-
     std::function<void(bool)> ampStateCallback;
     std::function<void(bool)> lstmStateCallback;
     std::function<void(bool)> irStateCallback;
     std::function<void(bool)> recordCallback;
 
 private:
+    String modelAddressPattern;
+    String irAddressPattern;
+    String irWetLevelAddressPattern;
+
     String gainAddressPattern;
     String masterAddressPattern;
     String bassAddressPattern;
@@ -317,9 +330,6 @@ private:
     String reverbWetLevelAddressPattern;
     String reverbDampingAddressPattern;
     String reverbRoomSizeAddressPattern;
-
-    String modelAddressPattern;
-    String irAddressPattern;
 
     String ampStateAddressPattern;
     String lstmStateAddressPattern;

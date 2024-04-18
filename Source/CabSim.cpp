@@ -1153,8 +1153,8 @@ void CabSim::Mixer::processSamples (const juce::dsp::AudioBlock<const float>& in
 
     auto dry = dryBlock.getSubsetChannelBlock (0, numChannels);
 
-    if (volumeDry[0].isSmoothing())
-    {
+    //if (volumeDry[0].isSmoothing())
+    //{
         dry.copyFrom (input);
 
         for (size_t channel = 0; channel < numChannels; ++channel)
@@ -1166,31 +1166,51 @@ void CabSim::Mixer::processSamples (const juce::dsp::AudioBlock<const float>& in
             volumeWet[channel].applyGain (output.getChannelPointer (channel), (int) numSamples);
 
         output += dry;
-    }
-    else
-    {
-        if (! currentIsBypassed)
-            processWet (input, output);
 
-        if (isBypassed != currentIsBypassed)
-        {
-            currentIsBypassed = isBypassed;
-
-            for (size_t channel = 0; channel < numChannels; ++channel)
-            {
-                volumeDry[channel].setTargetValue (isBypassed ? 0.0f : 1.0f);
-                volumeDry[channel].reset (sampleRate, 0.05);
-                volumeDry[channel].setTargetValue (isBypassed ? 1.0f : 0.0f);
-
-                volumeWet[channel].setTargetValue (isBypassed ? 1.0f : 0.0f);
-                volumeWet[channel].reset (sampleRate, 0.05);
-                volumeWet[channel].setTargetValue (isBypassed ? 0.0f : 1.0f);
-            }
-        }
-    }
+        //Apply volume correction because IR makes output quieter
+        for (size_t channel = 0; channel < numChannels; ++channel)
+            volumeCorrection[channel].applyGain (output.getChannelPointer (channel), (int) numSamples);
+    //}
+    //else
+    //{
+    //    if (! currentIsBypassed)
+    //        processWet (input, output);
+    //
+    //    if (isBypassed != currentIsBypassed)
+    //    {
+    //        currentIsBypassed = isBypassed;
+    //
+    //        applyWetLevel();
+    //    }
+    //}
 }
 
 void CabSim::Mixer::reset() { dryBlock.clear(); }
+#include <fstream>
+void CabSim::Mixer::setWetLevel(float wetLevel)
+{
+    this->wetLevel = juce::jlimit(0.0f, 1.0f, wetLevel);
+
+    applyWetLevel();
+}
+
+void CabSim::Mixer::applyWetLevel()
+{
+    for (size_t channel = 0; channel < volumeDry.size(); ++channel)
+    {
+        volumeDry[channel].setTargetValue (currentIsBypassed ? 1.0f - wetLevel : 1.0f);
+        volumeDry[channel].reset (sampleRate, 0.05);
+        volumeDry[channel].setTargetValue (currentIsBypassed ? 1.0f : 1.0f - wetLevel);
+
+        volumeWet[channel].setTargetValue (currentIsBypassed ? wetLevel : 0.0f);
+        volumeWet[channel].reset (sampleRate, 0.05);
+        volumeWet[channel].setTargetValue (currentIsBypassed ? 0.0f : wetLevel);
+
+        volumeCorrection[channel].setTargetValue (currentIsBypassed ? 1.0f + wetLevel : 1.0f);
+        volumeCorrection[channel].reset (sampleRate, 0.05);
+        volumeCorrection[channel].setTargetValue (currentIsBypassed ? 1.0f : 1.0f + wetLevel);
+    }
+}
 
 //==============================================================================
 CabSim::CabSim()
@@ -1289,3 +1309,8 @@ void CabSim::processSamples (const juce::dsp::AudioBlock<const float>& input,
 int CabSim::getCurrentIRSize() const { return pimpl->getCurrentIRSize(); }
 
 int CabSim::getLatency() const { return pimpl->getLatency(); }
+
+void CabSim::setWetLevel(float wetLevel)
+{
+    mixer.setWetLevel(wetLevel);
+}

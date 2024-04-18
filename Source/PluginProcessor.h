@@ -21,6 +21,13 @@
 
 #include "../JuceLibraryCode/JuceHeader.h"
 
+#define MODEL_ID "model"
+#define MODEL_NAME "Model"
+#define IR_ID "ir"
+#define IR_NAME "Ir"
+#define IRWETLEVEL_ID "irWetLevel"
+#define IRWETLEVEL_NAME "IrWetLevel"
+
 #define GAIN_ID "gain"
 #define GAIN_NAME "Gain"
 #define MASTER_ID "master"
@@ -77,11 +84,6 @@
 #define REVERBDAMPING_NAME "ReverbDamping"
 #define REVERBROOMSIZE_ID "reverbRoomSize"
 #define REVERBROOMSIZE_NAME "ReverbRoomSize"
-
-#define MODEL_ID "model"
-#define MODEL_NAME "Model"
-#define IR_ID "ir"
-#define IR_NAME "Ir"
 
 #define AMPSTATE_ID "ampState"
 #define AMPSTATE_NAME "AmpState"
