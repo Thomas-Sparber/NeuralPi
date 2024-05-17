@@ -45,6 +45,12 @@ NeuralPiAudioProcessor::NeuralPiAudioProcessor()
         loadIR(irFiles[ir_index]);
     }
 
+    chorus.addParameter("Mix",         [](auto &chorus, float newValue) { chorus.setMix(newValue); });
+    chorus.addParameter("Rate",        [](auto &chorus, float newValue) { chorus.setRate(newValue); });
+    chorus.addParameter("Depth",       [](auto &chorus, float newValue) { chorus.setDepth(newValue); });
+    chorus.addParameter("CentreDelay", [](auto &chorus, float newValue) { chorus.setCentreDelay(newValue); });
+    chorus.addParameter("Feedback",    [](auto &chorus, float newValue) { chorus.setFeedback(newValue); });
+
     oscReceiver.modelCallback = [&] (juce::String value) {
         bool found = false;
 
@@ -281,15 +287,15 @@ void NeuralPiAudioProcessor::parameterChanged (const juce::String& parameterID, 
     if (parameterID == CHORUS_ID)
         set_chorusParams(newValue);
     if (parameterID == CHORUSMIX_ID)
-        chorus.setMix(newValue);
+        chorus.setParameter("Mix", newValue);
     if (parameterID == CHORUSRATE_ID)
-        chorus.setRate(static_cast<int>(newValue * 99));
+        chorus.setParameter("Rate", newValue * 99);
     if (parameterID == CHORUSDEPTH_ID)
-        chorus.setDepth(newValue);
+        chorus.setParameter("Depth", newValue);
     if (parameterID == CHORUSCENTREDELAY_ID)
-        chorus.setCentreDelay(static_cast<int>(1 + newValue * 99));
+        chorus.setParameter("CentreDelay", 1 + newValue * 99);
     if (parameterID == CHORUSFEEDBACK_ID)
-        chorus.setFeedback(newValue * 2 - 1);
+        chorus.setParameter("Feedback", newValue * 2 - 1);
 
     if (parameterID == FLANGER_ID)
         set_flangerParams(newValue);
@@ -515,17 +521,41 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
     dsp::AudioBlock<float> block = dsp::AudioBlock<float>(buffer).getSingleChannelBlock(0);
     dsp::ProcessContextReplacing<float> context(block);
 
+    float currentBufferDurationSeconds = static_cast<float>(numSamples) / sampleRate;
+    
     // Amp =============================================================================
     if (ampState) {
-        if (model_loaded && lstmState) {
+        if (model_loaded && lstmState)
+        {
+            //Applying (auto adjusted) preamp gain
+            buffer.applyGain(0, 0, numSamples, preampGain);
+
+            //Averaged input RMS over the last 2 seconds
+            float currentRMS0 = buffer.getRMSLevel(0, 0, numSamples);
+            averagedRMSInput = (averagedRMSInput * 2 + currentRMS0 * currentBufferDurationSeconds) / (2 + currentBufferDurationSeconds);
+
+            /*static int counter = 0;
+            if(counter++ == 50)
+            {
+                counter = 0;
+                std::ofstream out("/tmp/debug", std::ios_base::app);
+                out<<"Average: "<<averagedRMSInput<<", gain: "<<preampGain<<std::endl;
+            }*/
+
+            //Although we all like guitars with high output (;-)) we don't want distortion here.
+            //Distortion should be applied by the Neural network!!!
+            //Therefore we measure the input signal level and adjust its gain so that no distortion occurs here!
+            if(averagedRMSInput > 1.0f)
+            {
+                preampGain = preampGain / averagedRMSInput;
+                averagedRMSInput = 1.0f;
+            }
+
             if(currentNeuralNetwork == 0)
             {
-                // Applying gain adjustment for snapshot models
+                // Applying gain
                 if (neuralNetwork1.input_size == 1) {
-                    //buffer.applyGain(gain * 2.0); //TODO check
-                    buffer.applyGain(0, 0, numSamples, gain * 2.5);
-                } else {
-                    buffer.applyGain(0, 0, numSamples, 1.5);
+                    buffer.applyGain(0, 0, numSamples, gain);
                 }
 
                 //auto block44k = resampler.processIn(block);
@@ -542,12 +572,9 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
             }
             else
             {
-                // Applying gain adjustment for snapshot models
+                // Applying gain
                 if (neuralNetwork2.input_size == 1) {
-                    //buffer.applyGain(gain * 2.0); //TODO check
-                    buffer.applyGain(0, 0, numSamples, gain * 2.5);
-                } else {
-                    buffer.applyGain(0, 0, numSamples, 1.5);
+                    buffer.applyGain(0, 0, numSamples, gain);
                 }
 
                 //auto block44k = resampler.processIn(block);
@@ -570,29 +597,10 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
         eq4band.process(buffer.getReadPointer(0), buffer.getWritePointer(0), midiMessages, numSamples, numInputChannels, sampleRate);
 
         // Process Delay, Reverb, Chorus and Flanger
-        //if(delayValue < 0.01)
-        //    context.isBypassed = true;
-        //set_delayParams(delayValue);
         delay.process(context);
-        //context.isBypassed = false;
-
-        //if(chorusValue < 0.01)
-        //    context.isBypassed = true;
-        //set_chorusParams(chorusValue);
         chorus.process(context);
-        //context.isBypassed = false;
-
-        //if(flangerValue < 0.01)
-        //    context.isBypassed = true;
-        //set_flangerParams(flangerValue);
         flanger.process(context);
-        //context.isBypassed = false;
-
-        //if(reverbValue < 0.01)
-        //    context.isBypassed = true;
-        //set_reverbParams(reverbValue);
         reverb.process(context);
-        //context.isBypassed = false;
 
         //    Master Volume 
 		if (currentNeuralNetwork == 0 && (neuralNetwork1.input_size == 1 || neuralNetwork1.input_size == 2) || currentNeuralNetwork == 1 && (neuralNetwork2.input_size == 1 || neuralNetwork2.input_size == 2)) {
@@ -629,20 +637,7 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
             const ScopedLock sl (writerLock);
             activeWriter = threadedWriter.get();
-
-
-            /*outstreamOutput = std::make_unique<FileOutputStream>(juce::File());
-
-            if(outstreamOutput->openedOk())
-            {
-                outstreamOutput->setPosition(0);
-                outstreamOutput->truncate();
-            }
-
-            writerOutput.reset(wavFormat.createWriterFor(outstreamOutput.get(), sampleRate, buffer.getNumChannels(), 24, {}, 0));*/
         }
- 
-        //writerOutput->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
 
         const ScopedLock sl(writerLock);
         activeWriter.load()->write(buffer.getArrayOfReadPointers(), numSamples);
@@ -650,9 +645,6 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
     if(!recording && activeWriter.load() != nullptr)
     {
-        /*writerOutput = nullptr;
-        outstreamOutput = nullptr;*/
-
         {
             const ScopedLock sl (writerLock);
             activeWriter = nullptr;
@@ -664,14 +656,13 @@ void NeuralPiAudioProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffe
 
 
     //Calculate averaged RMS over the last 10 seconds
-    float currentRMS = buffer.getRMSLevel(1, 0, numSamples);
-    float currentBufferDurationSeconds = static_cast<float>(numSamples) / sampleRate;
-    averagedRMS = (averagedRMS * 10 + currentRMS * currentBufferDurationSeconds) / (10 + currentBufferDurationSeconds);
+    float currentRMS1 = buffer.getRMSLevel(1, 0, numSamples);
+    averagedRMSLineIn = (averagedRMSLineIn * 10 + currentRMS1 * currentBufferDurationSeconds) / (10 + currentBufferDurationSeconds);
 
-    if(averagedRMS <= 0.01f && currentRMS < 0.03f) {
+    if(averagedRMSLineIn <= 0.01f && currentRMS1 < 0.03f) {
         buffer.copyFrom(1, 0, buffer, 0, 0, numSamples);
     } else {
-        averagedRMS = std::max(averagedRMS, 0.1f);
+        averagedRMSLineIn = std::max(averagedRMSLineIn, 0.1f);
 
         // store the sum in the left
         buffer.addFrom(0, 0, buffer, 1, 0, buffer.getNumSamples());
@@ -897,11 +888,11 @@ void NeuralPiAudioProcessor::set_chorusParams(float paramValue)
     //auto& ch = fxChain.template get<chorusIndex>();
 
     // Sets chorus params as a function of a single chorus param value ( 0.0 to 1.0)
-    chorus.setMix(paramValue);
-    chorus.setRate(50); // 0 - 99
-    chorus.setDepth(0.1);  //0.0f - 1.0f
-    chorus.setCentreDelay(8);  //1 - 100
-    chorus.setFeedback(0.1);  //-1.0f - 1.0f
+    chorus.setParameter("Mix", paramValue);
+    chorus.setParameter("Rate", 50); // 0 - 99
+    chorus.setParameter("Depth", 0.1);  //0.0f - 1.0f
+    chorus.setParameter("CentreDelay", 8);  //1 - 100
+    chorus.setParameter("Feedback", 0.1);  //-1.0f - 1.0f
 }
 
 void NeuralPiAudioProcessor::set_flangerParams(float paramValue)

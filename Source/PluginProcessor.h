@@ -16,6 +16,7 @@
 #include "CabSim.h"
 #include "Delay.h"
 #include "AmpOSCReceiver.h"
+#include "SmoothingEffect.h"
 
 #pragma once
 
@@ -167,6 +168,7 @@ public:
     File userAppDataDirectory_tones = userAppDataDirectory.getFullPathName() + "/tones";
     File userAppDataDirectory_irs = userAppDataDirectory.getFullPathName() + "/irs";
 
+    float preampGain = 10.0f;
     float gain = 0.5f;
     float master = 0.5f;
     float delayValue = 0.0f;
@@ -187,7 +189,8 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
-    float averagedRMS = 0;
+    float averagedRMSInput = 0;
+    float averagedRMSLineIn = 0;
 
 private:
     bool recording = false;
@@ -215,7 +218,7 @@ private:
 
     Delay<float> delay;
     juce::dsp::Reverb reverb;
-    juce::dsp::Chorus<float> chorus;
+    SmoothingEffect<juce::dsp::Chorus<float>> chorus;
     juce::dsp::Chorus<float> flanger;
 
     //==============================================================================
