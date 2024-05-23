@@ -1,3 +1,42 @@
+
+## Fork
+
+This for of GuitarML's NeuralPI contains the following differences/improvements:
+
+ - Other architectures except RPI removed
+ - GUI removed
+ - Ability to load [NeuralPI](https://github.com/GuitarML/NeuralPi) and [Proteus](https://github.com/GuitarML/Proteus) models
+ - Modified CabSim (impulse response) which allows to set wet level
+ - `Model` and `Ir` values can now be set as string via OSC
+ - Direct recording of your guitar as WAV file
+ - Auto adjustment of guitar level: Guitars with high output signal need less preamplification than guitars with low output signal
+ - Additional effects: Chorus + Flanger
+ - Additional parameters which can be controlled via OSC:
+   - IrWetLevel
+   - DelayWetLevel
+   - DelayTime
+   - DelayFeedback
+   - Chorus
+   - ChorusMix
+   - ChorusRate
+   - ChorusDepth
+   - ChorusCentreDelay
+   - ChorusFeedback
+   - Flanger
+   - FlangerMix
+   - FlangerRate
+   - FlangerDepth
+   - FlangerCentreDelay
+   - FlangerFeedback
+   - ReverbWetLevel
+   - ReverbDamping
+   - ReverbRoomSize
+   - AmpState (bypass on/off)
+   - LSTMState (neural network bypass)
+   - IrState (IR bypass)
+   - Record (record WAV file)
+
+
 # NeuralPi
 
 [![CI](https://github.com/GuitarML/NeuralPi/actions/workflows/cmake.yml/badge.svg)](https://github.com/GuitarML/NeuralPi/actions/workflows/cmake.yml) [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-brightgreen.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Downloads](https://img.shields.io/github/downloads/GuitarML/NeuralPi/total)](https://somsubhra.github.io/github-release-stats/?username=GuitarML&repository=NeuralPi&page=1&per_page=30)
